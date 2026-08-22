@@ -1,0 +1,48 @@
+# auto-content-pipeline 默认配置
+# linc 可以改 ~/.openclaw/workspace/skills/auto-content-pipeline/config/user.yaml 覆盖
+
+vault:
+  root: ~/Documents/Obsidian Vault/07-选题与发布
+
+xiaohongshu:
+  poster_script: ~/.openclaw/workspace/xiaohongshu_poster.py
+  article_file: ~/.openclaw/workspace/article_to_post.txt
+  cookies_file: ~/.openclaw/workspace/xiaohongshu_cookies.json
+
+scan:
+  # scan 时用哪些源（sources.json 详细定义）
+  sources:
+    - weibo-trending
+    - xiaohongshu-hot
+    - zhihu-hot
+    - twitter-trending
+    - rss:bbc-world
+    - rss:reuters-top
+  max_briefs: 8                # 每次 scan 最多产出多少 brief
+  duplicate_window_days: 7     # 几天内的同主题 brief 当作重复
+  deadline_hours: 36           # brief 默认时效
+
+review:
+  top_n: 3                     # review 后给 linc 看几个
+  push_to: feishu              # 推送渠道
+  push_window: "09:00-09:30"   # 推送窗口（cron schedule 已经卡了，这只是 hint）
+
+write:
+  style_file: _config/style-document.md
+  word_count: [300, 700]       # 目标长度区间
+  emoji_density: medium        # low | medium | high
+
+cover:
+  style_file: _config/style-cover.md
+  aspect: "3:4"                # 小红书封面 3:4
+  size: "1242x1660"
+  provider: openai             # 走 OpenClaw 的 image_generate
+
+publish:
+  auto_after_cover: true       # cover 完后是否自动发布（默认 true）
+  require_linc_double_check: false  # 发布前还要再人工看一眼吗
+
+cron:
+  scan: "0 20 * * 0"           # 周日 20:00
+  review: "0 9 * * *"          # 每天 09:00
+  tz: Asia/Shanghai

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "last_scan": "2026-08-22T07:28:25+0800",
+  "last_review": "2026-08-22T07:28:19+0800",
+  "last_publish": null,
+  "counters": {
+    "scanned_total": 0,
+    "briefs_total": 0,
+    "approved_total": 0,
+    "published_total": 0,
+    "rejected_total": 0
+  },
+  "errors": [
+    {
+      "code": "E_REVIEW_EMPTY",
+      "msg": "没有 pending_review brief",
+      "at": "2026-08-22T07:28:19+0800"
+    }
+  ],
+  "config_loaded": {
+    "style_document_version": "1.0",
+    "style_cover_version": "1.0",
+    "sources_version": 1
+  }
+}

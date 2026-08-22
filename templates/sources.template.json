@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-22",
+  "sources": [
+    {
+      "id": "weibo-trending",
+      "name": "微博热搜",
+      "url": "https://s.weibo.com/top/summary",
+      "type": "html",
+      "fetch_method": "web_fetch",
+      "parse": "找 .td-02 a 标签里的标题",
+      "enabled": true,
+      "note": "国内热点主源，半衰期短（24h）"
+    },
+    {
+      "id": "xiaohongshu-hot",
+      "name": "小红书热榜",
+      "url": "https://www.xiaohongshu.com/explore",
+      "type": "html",
+      "fetch_method": "web_fetch",
+      "parse": "首页热榜卡片",
+      "enabled": true,
+      "note": "平台内趋势，参考用"
+    },
+    {
+      "id": "zhihu-hot",
+      "name": "知乎热榜",
+      "url": "https://www.zhihu.com/billboard",
+      "type": "html",
+      "fetch_method": "web_fetch",
+      "parse": "热榜列表",
+      "enabled": true,
+      "note": "深度讨论向"
+    },
+    {
+      "id": "twitter-trending",
+      "name": "Twitter 全球趋势",
+      "url": "https://trends24.in/",
+      "type": "html",
+      "fetch_method": "web_fetch",
+      "parse": "全球/各国分项趋势",
+      "enabled": true,
+      "note": "国际新闻主源"
+    },
+    {
+      "id": "rss:bbc-world",
+      "name": "BBC World",
+      "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "type": "rss",
+      "fetch_method": "web_fetch",
+      "parse": "item title + link + pubDate",
+      "enabled": true,
+      "note": "国际新闻权威源"
+    },
+    {
+      "id": "rss:reuters-top",
+      "name": "Reuters Top",
+      "url": "https://feeds.reuters.com/Reuters/worldNews",
+      "type": "rss",
+      "fetch_method": "web_fetch",
+      "parse": "item title + link + pubDate",
+      "enabled": true,
+      "note": "国际新闻补充"
+    },
+    {
+      "id": "rss:36kr",
+      "name": "36氪快讯",
+      "url": "https://36kr.com/feed",
+      "type": "rss",
+      "fetch_method": "web_fetch",
+      "parse": "item title + link",
+      "enabled": false,
+      "note": "科技向，目前关掉"
+    }
+  ]
+}

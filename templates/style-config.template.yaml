@@ -1,0 +1,77 @@
+# 账号配置（linc 自己改）
+
+account:
+  platform: xiaohongshu
+  name: 你的账号名
+  audience:
+    age: [18, 35]
+    location: 中国
+    interests: [突发新闻, 国际局势, 民生, 科技, 娱乐]
+  tone: 短平快、有信息量、有态度
+  # 每日发文上限（防止刷屏）
+  daily_post_limit: 3
+
+publish_window:
+  weekday: ["07:30-09:30", "12:00-13:30", "20:00-22:00"]
+  weekend: ["09:30-11:30", "14:00-16:00", "20:00-23:00"]
+  # 在这些窗口之外，pipeline 会 hold 住不发布
+  enforce: true
+
+scan:
+  sources: 
+    - weibo-trending
+    - xiaohongshu-hot
+    - zhihu-hot
+    - twitter-trending
+    - rss:bbc-world
+    - rss:reuters-top
+  max_briefs: 8
+  duplicate_window_days: 7
+  min_score: 6.0
+
+review:
+  top_n: 3
+  push_to: feishu
+  push_window: "09:00-09:30"
+
+sensitive:
+  # 完全不做的
+  topics:
+    - 中国领导人/政治内幕（外网不报道）
+    - 民族分裂话题
+    - 邪教/恐怖主义细节
+    - 色情/低俗
+    - 医疗虚假宣传
+    - 投资/股票具体推荐
+  # 小心做的（要做必须多源交叉验证）
+  caution:
+    - 自然灾害伤亡数字
+    - 刑事案件细节
+    - 国际冲突（必须多源）
+    - 明星私人生活（已证实）
+
+# 不同话题类型对应的风格色板（参考 _config/style-cover.md）
+topic_color_map:
+  breaking_news: red      # 红板
+  tech: blue              # 蓝板
+  finance: blue           # 蓝板（带涨跌色）
+  social: orange          # 橙板
+  international: red      # 红板
+  entertainment: orange   # 橙板
+  sports: blue            # 蓝板
+
+# agent 行为开关
+agent:
+  auto_publish_after_cover: true     # cover 完后是否自动 publish（不经过 linc 再确认）
+  require_double_check: false        # 发布前要 linc 再看一眼吗
+  push_errors_to_linc: true          # 出错是否主动推
+  retry:
+    scan_fail: 2                     # scan 源失败重试次数
+    cover_fail: 2                    # cover 生成失败重试
+
+# 状态保留期
+retention:
+  briefs_days: 30                    # _briefs/ 保留 30 天后清理
+  drafts_days: 14                    # _drafts/ 保留 14 天
+  published_keep: forever            # _published/ 永久
+  rejected_days: 7                   # _rejected/ 7 天后清
