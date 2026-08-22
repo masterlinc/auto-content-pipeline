@@ -105,12 +105,20 @@ pending → ingest_done → reviewed → modified → illustrated → stored →
                                    failed（任意 stage 可失败）
 ```
 
-## 风格模板（review 阶段必读）
+## 风格模板（review + illustrate 阶段必读）
 
-`templates/style-templates/` 目录下放 3 份风格规范：
+`templates/style-templates/` 目录下放 4 份风格规范：
+- **`dankoe.md`（默认 ⭐）** —— 黑底白字 / 单色调 / 大留白 / 大字占 60-80% / 一句一观点。**illustrate 阶段默认走这个**
 - `公众号.md` —— 长文 / 标题党 / 故事化开头 / 多段落 / 强 CTA
 - `网红.md` —— 短句 / emoji 多 / 情绪化 / 个人化视角 / 一句话金句
 - `极客.md` —— 技术准确 / 代码块 / 工具对比表 / 客观中立
+
+### 选模板顺序（illustrate stage 默认）
+
+1. **观点 / 强情绪 / 反常识** → **`dankoe.md`**（默认）
+2. 教程 / 工具盘点 / 实操 → 极客.md
+3. 种草 / 体验 / 个人故事 → 网红.md
+4. 长文深度 / 案例分析 → 公众号.md
 
 修改风格规范前必须跟 linc 确认 —— agent 不自动改。
 

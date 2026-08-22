@@ -9,8 +9,20 @@
 ### 1. 必读
 
 - `_drafts/{draft_id}/article.md`（改稿后正文）
-- `templates/style-templates/cover-default.md`（封面风格，可选）
+- **`templates/style-templates/dankoe.md`（默认 ⭐）**
+- 其它备选：`公众号.md` / `网红.md` / `极客.md`
 - `config/default.yaml` 中 `illustrate.*`（封面规格 + 正文图数量 + 排版）
+
+### 选模板逻辑
+
+按下列顺序判断，只在内容**明显**符合下一种时才**不**用 dankoe：
+
+1. **dankoe.md** ← 默认，除非内容明确是其它类型
+2. 极客.md ← 文章含 `代码块` / `工具对比表` / `API 调用`
+3. 网红.md ← 文章含大量 `emoji` / 强 `个人化语气` / `体验分享`
+4. 公众号.md ← 文章 > 2500 字 / 含 `故事化开头` / `多段落论证`
+
+**有歧义时默认 dankoe**（一句话主张最稳）。
 
 ### 2. 生成封面
 
