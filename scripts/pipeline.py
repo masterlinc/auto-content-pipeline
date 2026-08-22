@@ -1,44 +1,68 @@
 #!/usr/bin/env python3
 """
-pipeline.py — CLI 入口（v3: Codex Harness Edition）
+pipeline.py — CLI 入口（v2，回退版）
 
-默认走 Codex Harness（v3），v2 stage 脚本作为 fallback。
+默认走 v2 stage 脚本（直接调 Python）。
+v3 Codex Harness 作为**可选**（设 ACP_USE_CODEX=1 启用）。
 
 用法：
   pipeline.py ingest <草稿.md>
   pipeline.py ingest --from-vault
-  pipeline.py review <draft_id>          # v3: 调 codex_runner
-  pipeline.py modify <draft_id>          # v3: 调 codex_runner
-  pipeline.py illustrate <draft_id>      # v3: 调 codex_runner
-  pipeline.py store <draft_id>           # v3: 调 codex_runner
+  pipeline.py review <draft_id>
+  pipeline.py modify <draft_id>
+  pipeline.py illustrate <draft_id>
+  pipeline.py store <draft_id>
   pipeline.py publish <draft_id> [--platforms xiaohongshu,juejin]
-  pipeline.py run-all <草稿.md>          # ingest → store 全跑
-  pipeline.py status                      # 看所有 draft 状态
+  pipeline.py run-all <草稿.md>
+  pipeline.py status
 
 环境变量：
-  ACP_USE_V2=1    # 强制走 v2 stage 脚本（不走 Codex）
-  ACP_DRY_RUN=1   # 只打印 prompt 不真调 Codex
+  ACP_USE_CODEX=1    # 走 v3 Codex Harness（需要装 codex CLI + OAuth）
+  ACP_USE_V2=1       # 强制走 v2（默认就是 v2，这变量冗余写明）
+  ACP_DRY_RUN=1      # 调 Codex 时只打印 prompt 不真跑（仅 v3 生效）
 """
 
 import os
 import sys
-import shutil
 import subprocess
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-USE_V2 = os.environ.get("ACP_USE_V2") == "1"
+USE_CODEX = os.environ.get("ACP_USE_CODEX") == "1"
 DRY_RUN = os.environ.get("ACP_DRY_RUN") == "1"
-CODEX_BIN = shutil.which("codex")
+
+
+# ====== Stage runner ======
+
+def run_v2(stage: str, draft_id: str, *extra) -> int:
+    """v2: 调原 stage 脚本。"""
+    script_map = {
+        "review": "review.py",
+        "modify": "modify.py",
+        "illustrate": "illustrate.py",
+        "store": "store.py",
+        "publish": "publish.py",
+    }
+    script = script_map.get(stage)
+    if not script:
+        print(f"❌ 未知 stage: {stage}")
+        return 1
+    cmd = ["python3", str(HERE / script), draft_id]
+    if extra:
+        cmd.extend(extra)
+    print(f"▶ v2/{stage}: {' '.join(cmd[2:])}")
+    return subprocess.call(cmd)
 
 
 def run_v3(stage: str, draft_id: str, *extra) -> int:
-    """v3: 调 codex_runner.py。"""
-    if not CODEX_BIN and not DRY_RUN:
-        print(f"⚠️  codex CLI 未装，自动降级到 v2 stage 脚本")
-        return run_v2(stage, draft_id)
+    """v3: 调 codex_runner.py（Codex Harness）。"""
+    import shutil
+    if not shutil.which("codex"):
+        print("⚠️  codex CLI 未装，自动降级到 v2 stage 脚本")
+        print("   装 codex：`npm i -g @openai/codex`")
+        return run_v2(stage, draft_id, *extra)
 
     cmd = ["python3", str(HERE / "codex_runner.py"), stage, "--draft-id", draft_id]
     if DRY_RUN:
@@ -46,28 +70,6 @@ def run_v3(stage: str, draft_id: str, *extra) -> int:
     if extra:
         cmd.extend(extra)
     print(f"▶ v3/{stage}: {' '.join(cmd[2:])}")
-    return subprocess.call(cmd)
-
-
-def run_v2(stage: str, draft_id: str, *extra) -> int:
-    """v2: 调原 stage 脚本（fallback）。"""
-    if stage == "review":
-        script = "review.py"
-    elif stage == "modify":
-        script = "modify.py"
-    elif stage == "illustrate":
-        script = "illustrate.py"
-    elif stage == "store":
-        script = "store.py"
-    elif stage == "publish":
-        script = "publish.py"
-    else:
-        print(f"❌ 未知 stage: {stage}")
-        return 1
-    cmd = ["python3", str(HERE / script), draft_id]
-    if extra:
-        cmd.extend(extra)
-    print(f"▶ v2/{stage}: {' '.join(cmd[2:])}")
     return subprocess.call(cmd)
 
 
@@ -106,14 +108,15 @@ def cmd_run_all(ingest_arg: str) -> int:
     draft_id = drafts[0].name
     print(f"\n检测到新 draft: {draft_id}\n")
 
-    # 后面 stage 默认走 v3（Codex），除非 ACP_USE_V2=1
-    runner = run_v2 if USE_V2 else run_v3
+    runner = run_v3 if USE_CODEX else run_v2
+    if USE_CODEX:
+        print(f"⚙️  ACP_USE_CODEX=1 → 走 v3 (Codex Harness)")
     for stage in ("review", "modify", "illustrate", "store"):
         if runner(stage, draft_id) != 0:
             print(f"❌ {stage} {draft_id} 失败，停止")
             return 1
     print(f"\n✅ 一条龙完成。draft_id = {draft_id}")
-    print(f"   下一步：ACP_DRY_RUN=1 python3 $ACP/scripts/pipeline.py publish {draft_id} --platforms xiaohongshu")
+    print(f"   下一步：python3 $ACP/scripts/pipeline.py publish {draft_id} --platforms xiaohongshu")
     return 0
 
 
@@ -124,15 +127,13 @@ def main() -> int:
     cmd = sys.argv[1]
     args = sys.argv[2:]
 
-    if USE_V2:
-        print(f"⚙️  ACP_USE_V2=1 → 走 v2 stage 脚本")
+    if USE_CODEX:
+        print(f"⚙️  ACP_USE_CODEX=1 → 走 v3 (Codex Harness)")
     if DRY_RUN:
-        print(f"⚙️  ACP_DRY_RUN=1 → 只打印 prompt")
-    if not USE_V2 and not CODEX_BIN and not DRY_RUN:
-        print(f"⚠️  codex CLI 未装，降级到 v2（如要 v3：`npm i -g @openai/codex`）")
-        print()
+        print(f"⚙️  ACP_DRY_RUN=1 → Codex 只打印 prompt")
+    print()
 
-    runner = run_v2 if USE_V2 else run_v3
+    runner = run_v3 if USE_CODEX else run_v2
 
     if cmd == "ingest":
         return subprocess.call(["python3", str(HERE / "ingest.py")] + args)
