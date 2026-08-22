@@ -1,81 +1,69 @@
-# Auto Content Pipeline
+# Auto Content Pipeline v2
 
-小红书 / 公众号**端到端自动化**内容流水线。
+内容打磨 + 多平台发布流水线。
 
 ## 它做什么
 
 ```
-周日 20:00  抓全网热点 → 评估 → 5-10 个选题 brief
-每天 09:00  复核 brief → 选 3 个 → 推送飞书等你点头
-你回复 OK   自动写文章 + 生成封面 + 发布到小红书
+拿草稿 → 按公众号/网红/极客风格 review → 自动 modify → 图文并茂 → 入库 → 多平台发布
 ```
+
+## v1 → v2
+
+- v1：从零开始生产内容（scan → write → cover → publish）
+- **v2：拿到草稿后打磨发布**（ingest → review → modify → illustrate → store → publish）
+
+定位从"自媒体选题工厂"变成"公众号/网红/极客风的润色+分发工具"。
 
 ## 快速跑一遍
 
 ```bash
-ACP=/Users/masterlinc/.openclaw/workspace/skills/auto-content-pipeline
+ACP=~/.openclaw/workspace/skills/auto-content-pipeline
 
-# 1. 跑一次 scan（生成 brief）
-python3 $ACP/scripts/pipeline.py scan
+# 1. ingest（从 vault 草稿拿一份）
+python3 $ACP/scripts/pipeline.py ingest ~/Documents/Obsidian\ Vault/00-转型·一人事业/04-原创写作专区/草稿/某文.md
 
-# 2. 看 brief 状态
-python3 $ACP/scripts/pipeline.py status
+# 2. 一条龙
+python3 $ACP/scripts/pipeline.py run-all <上一步返回的 draft_id>
 
-# 3. 手动触发 review（不等 cron）
-python3 $ACP/scripts/pipeline.py review
-
-# 4. 模拟你确认一个 brief
-python3 $ACP/scripts/pipeline.py confirm approved 2026-08-24_xxx
-
-# 5. 一条龙跑完剩下的
-python3 $ACP/scripts/pipeline.py run-all
+# 3. 单步调试
+python3 $ACP/scripts/pipeline.py review <id>
+python3 $ACP/scripts/pipeline.py modify <id>
+python3 $ACP/scripts/pipeline.py illustrate <id>
+python3 $ACP/scripts/pipeline.py store <id>
+python3 $ACP/scripts/pipeline.py publish <id> --platforms xiaohongshu,juejin
 ```
 
 ## 文件地图
 
 ```
 skills/auto-content-pipeline/
-├── SKILL.md               ← 必读！agent 调用契约
-├── README.md              ← 你正在读
-├── scripts/
-│   ├── pipeline.py       ← CLI 入口
-│   ├── state.py          ← vault 状态 I/O
-│   ├── brief.py          ← brief frontmatter 读写
-│   ├── scan.py           ← Stage 1
-│   ├── review.py         ← Stage 2
-│   ├── confirm.py        ← Stage 3
-│   ├── write.py          ← Stage 4
-│   ├── cover.py          ← Stage 5
-│   └── publish.py        ← Stage 6 (包装 xiaohongshu_poster.py)
-├── prompts/              ← 每个 stage 的 prompt 模板
-├── config/default.yaml   ← 默认配置
-└── tests/install-cron.sh ← 装 cron 的脚本
+├── SKILL.md                ← agent 调用契约
+├── README.md               ← 你读的快速说明
+├── CHANGELOG.md            ← 版本变更
+├── VERSION                 ← 2.0.0
+├── config/default.yaml     ← 全局配置
+├── prompts/                ← 6 个 stage prompt
+├── scripts/                ← 9 个脚本
+├── templates/style-templates/  ← 公众号/网红/极客 模板
+└── tests/install-cron.sh
 ```
 
-## Vault 那边的样子
+## 发布平台
 
-```
-~/Documents/Obsidian Vault/07-选题与发布/
-├── _config/      风格固化 + 源配置（linc 自己改）
-├── _briefs/      当前在跑的选题
-├── _drafts/      草稿 + 封面
-├── _published/   已发布（按 brief_id 归档）
-├── _rejected/    已拒绝（保留 30 天做参考）
-└── _state.json   流水线心跳
-```
-
-## 风格改了怎么办
-
-`_config/style-document.md` 和 `_config/style-cover.md` 是**锁定**的。
-要改直接告诉我，我会改并写到 `MEMORY.md` 记一笔。
+| 平台 | 状态 |
+|------|------|
+| 小红书 | ✅ 可用 |
+| 掘金 | 🚧 待配置 |
+| 少数派 | 🚧 待配置 |
+| 知乎 | 🚧 待配置 |
+| 公众号 | ⏸ 待接入 API（不走浏览器） |
 
 ## 给其他 agent 怎么调
 
-最小调用：
-
 ```
 请按 ~/.openclaw/workspace/skills/auto-content-pipeline/SKILL.md 执行 stage: review。
-完成后回报：哪些 brief 进了 awaiting_user、推送结果。
+draft_id: 2026-08-22_xxx
 ```
 
-子 agent 会自己读 SKILL.md、自己读 prompt、自己跑。
+子 agent 读 SKILL.md 自己就知道怎么干。

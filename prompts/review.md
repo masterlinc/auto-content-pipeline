@@ -2,73 +2,81 @@
 
 ## 你的任务
 
-复核所有 `status=pending_review` 的 brief，挑 **top N（默认 3）** 给 linc 决策。
+按 **3 套风格模板**（公众号 / 网红 / 极客）给草稿打分，输出 review.json，含每维度得分 + 改稿建议。
 
 ## 步骤
 
-### 1. 读 context
+### 1. 必读
 
-- `_config/style-config.yaml`
-- `_config/style-document.md`
-- `_briefs/*.md` 里所有 `status=pending_review`
+- `_drafts/{draft_id}/source.md`（草稿原文）
+- `templates/style-templates/公众号.md`、`网红.md`、`极客.md`（3 套风格规范）
+- `config/default.yaml` 中 `review.weights`（3 套模板的权重）
 
-### 2. 二次评分
+### 2. 对每个风格维度打分
 
-对每个 pending brief：
-- web_search 关键词，**看 24h 内是否还有热度**
-- 时效性已过的（原始事件已无新进展）：降到 ≤ 4
-- 仍在升温的：原分 +0.5
-- 已有新反转的：在 brief body 里加一节"最新动态"，分不变
+每套模板给 0-10 分：
 
-### 3. 选 top N
+| 维度 | 说明 |
+|------|------|
+| **标题** | 是否有冲击力、是否符合该风格标题套路 |
+| **开头** | 前 3 句是否抓人 |
+| **结构** | 段落/小标题是否清晰 |
+| **节奏** | 长短句搭配、emoji 密度 |
+| **CTA** | 结尾是否有行动号召 |
+| **平台适配** | 整体调性是否符合目标平台用户 |
 
-按新评分排序，取前 N（默认 3）。
+总分 = 加权和（公众号 0.4 / 网红 0.3 / 极客 0.3）。
 
-### 4. 推进状态
+### 3. 选最强风格
 
-- 选中的：`update_status(brief_id, 'awaiting_user', score=new_score)`
-- 没选中的：保持 `pending_review`（明天 review 还会再看）
+取总分最高的风格作为 `primary_style`，给后续 modify stage 用。
 
-### 5. 生成 daily-pick
+### 4. 输出改稿建议
 
-写到 `_briefs/daily-pick-YYYY-MM-DD.md`：
+按 `min_dim_score` 过滤（默认 6.0），低于阈值的维度生成具体改稿建议。每条建议格式：
 
-```markdown
----
-date: 2026-08-22
-top_n: 3
-total_pending: 8
----
-
-# 今日选题（2026-08-22）
-
-共扫到 8 个候选，挑了 3 个最热的。
-
-## 1. 伊朗对以色列发动大规模导弹袭击（评分 9.2）
-- ID: `2026-08-22_xxx`
-- 来源: weibo-trending
-- 摘要: 一句话
-- 为什么: 时效性强 + 受众关心
-
-## 2. ...
-## 3. ...
+```json
+{
+  "dimension": "标题",
+  "current_score": 4.5,
+  "suggestion": "标题偏长，公众号风格 28 字内最佳。当前 38 字，建议砍掉后半句。",
+  "example_rewrite": "从伊朗 4 月出口数据看 2026 的供应链危机"
+}
 ```
 
-### 6. 推送飞书
+最多返回 `review.max_suggestions` 条（默认 10）。
 
-调 `message(action="send")` 给 linc，**模板见 `prompts/confirm-message.md`**。
+### 5. 写到 `_drafts/{draft_id}/review.json`
 
-### 7. 更新 state
+```json
+{
+  "draft_id": "2026-08-22_xxx",
+  "reviewed_at": "2026-08-22T16:35:00+08:00",
+  "scores": {
+    "gongzhonghao": { "title": 7, "opening": 6, "structure": 8, ... },
+    "wanghong": { ... },
+    "jike": { ... }
+  },
+  "weighted_total": 7.2,
+  "primary_style": "gongzhonghao",
+  "suggestions": [
+    { "dimension": "标题", "current_score": 4.5, ... }
+  ],
+  "status": "reviewed"
+}
+```
 
-`save_state(state)`。
+### 6. 更新 state
+
+brief status → `reviewed`，加 reviewed_at。
 
 ## 失败处理
 
-- 没有 pending brief：跳过推送，写 `E_REVIEW_EMPTY`，不打扰 linc
-- 飞书推送失败：写到 `_briefs/daily-pick-xxx.md` 就行，linc 自己扫 vault
+- 模板文件缺失 → 报错退出，提示用户补 templates
+- 草稿太短无法评分 → 给"信息不足，建议补内容"作为唯一建议
 
 ## 严禁
 
-- ❌ 把所有 brief 都标 awaiting_user —— top N 是硬限制
-- ❌ 推完不写 daily-pick —— vault 是 fallback
-- ❌ 修改 brief body 内容 —— review 只动 score 和 status
+- ❌ 改写草稿（review 只打分和建议，不动手）
+- ❌ 给所有维度都打高分（要诚实）
+- ❌ 编造不存在的格式问题（基于模板原文判断）

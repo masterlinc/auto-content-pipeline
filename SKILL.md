@@ -1,130 +1,132 @@
 ---
 name: auto-content-pipeline
-description: "小红书/公众号自动化内容流水线：每周日 20:00 自动从互联网抓热点 → 生成候选选题 brief → 每日复核 → 推送给 linc 确认 → 自动写文章 + 生成封面 → 调用 xiaohongshu_poster.py 发布。整个流水线用 vault 状态文件串联，可被任意 agent 通过 cron / spawn / CLI 三种方式调用。"
+description: "内容打磨 + 多平台发布流水线：拿到草稿后按公众号 / 网红 / 极客三种风格模板 review → 自动 modify → 图文并茂 illustrate → 入库到 Obsidian 价值文章区 → 一键分发到小红书 / 掘金 / 少数派 / 知乎 / 公众号（API 待接入）。任意 OpenClaw agent 都可通过 CLI / cron / sub-agent 三种方式调用。"
 metadata:
   {
     "openclaw":
       {
-        "emoji": "📰",
+        "emoji": "✨",
         "homepage": "skills/auto-content-pipeline/README.md",
         "user_invocable": true
       }
   }
 ---
 
-# Auto Content Pipeline
+# Auto Content Pipeline v2 — 打磨工坊
 
-把"互联网热点 → 小红书文章"做成端到端自动化。任意 agent 都可以调用：本 skill 既是给主 agent 读的 SOP，也是给 cron / sub-agent 派发任务的契约。
+把"草稿 → 公众号/网红/极客风爆款文 → 多平台分发"做成端到端自动化。任意 agent 都可以调用。
+
+> **v1 → v2 重大变更**：v1 是"从零开始生产内容"（scan → review → write → cover → publish）。v2 改成"**拿到草稿后打磨发布**"（ingest → review → modify → illustrate → store → publish）。scan 子流程保留作为 ingest 的可选源。
 
 ## 六阶段流水线
 
 ```
-[scan] → [review] → [confirm] → [write] → [cover] → [publish]
-  周日20:00  每天09:00   等用户回复    立即       立即       立即
+[ingest] → [review] → [modify] → [illustrate] → [store] → [publish]
+  拿草稿     风格评审     自动润色     图文并茂      入库       多平台分发
 ```
 
-| Stage     | 触发                | 输入                                       | 输出 / 副作用                                                  | 状态字段                                       |
-|-----------|---------------------|--------------------------------------------|----------------------------------------------------------------|------------------------------------------------|
-| **scan**  | cron 周日 20:00     | sources.json + 历史 brief（去重）          | `_briefs/*.md` （status=`pending_review`），通常 5-10 个       | `status: pending_review`                       |
-| **review**| cron 每天 09:00     | `_briefs/` 中 `pending_review` 的 brief    | 更新为 `awaiting_user`；生成 `daily-pick-YYYY-MM-DD.md` 汇总；推送飞书 | `status: awaiting_user`                        |
-| **confirm**| linc 在飞书/CLI 决策 | linc 的回复                              | brief status → `approved` / `rejected` / `modified`            | `status: approved/rejected/modified`           |
-| **write** | confirm 后自动      | status=`approved` 的 brief + style-document | `_drafts/{id}/article.md`                                     | `status: awaiting_cover`                       |
-| **cover** | write 后自动        | article.md + style-cover                  | `_drafts/{id}/cover.png` + `cover-prompt.md`                   | `status: awaiting_publish`                     |
-| **publish**| cover 后自动      | `_drafts/{id}/` 全部                      | 调用 `xiaohongshu_poster.py`，移到 `_published/{id}/`          | `status: published` + `_state.json.last_publish` |
+| Stage        | 做什么                                              | 输入                          | 输出                                              |
+|--------------|-----------------------------------------------------|-------------------------------|---------------------------------------------------|
+| **ingest**   | 拿草稿                                              | vault 草稿 / 手动 / scan 子流程 | `_drafts/{id}/source.md`                          |
+| **review**   | 按 公众号/网红/极客 三套风格模板打分               | source + 3 个模板             | `review.json`（每维度得分 + 改稿建议）           |
+| **modify**   | 自动按 review 结果改稿                              | source + review.json          | `_drafts/{id}/article.md`                         |
+| **illustrate** | 配图（封面 + 正文 2-3 张）                        | article.md                    | cover.png + body-img-{n}.png                      |
+| **store**    | 入库到 Obsidian 价值文章区                          | 全部 draft 产物               | vault `04-原创写作专区/价值文章/{id}/`            |
+| **publish**  | 多平台分发                                          | store 后的成品                | 小红书 + 掘金 + 少数派 + 知乎（公众号待接入 API） |
 
 ## 三种调用方式
 
 ### 1. CLI（本地直接跑）
 
 ```bash
-ACP=/Users/masterlinc/.openclaw/workspace/skills/auto-content-pipeline
-python3 $ACP/scripts/pipeline.py scan       # 周日 20:00 cron 用
-python3 $ACP/scripts/pipeline.py review     # 每天 09:00 cron 用
-python3 $ACP/scripts/pipeline.py confirm approved <brief_id>
-python3 $ACP/scripts/pipeline.py write <brief_id>
-python3 $ACP/scripts/pipeline.py cover <brief_id>
-python3 $ACP/scripts/pipeline.py publish <brief_id>
-python3 $ACP/scripts/pipeline.py run-all    # 一条龙（用户主动跑时用）
-python3 $ACP/scripts/pipeline.py status     # 看当前所有 brief 状态
+ACP=~/.openclaw/workspace/skills/auto-content-pipeline
+python3 $ACP/scripts/pipeline.py ingest    <草稿路径或brief_id>
+python3 $ACP/scripts/pipeline.py review   <draft_id>
+python3 $ACP/scripts/pipeline.py modify   <draft_id>
+python3 $ACP/scripts/pipeline.py illustrate <draft_id>
+python3 $ACP/scripts/pipeline.py store    <draft_id>
+python3 $ACP/scripts/pipeline.py publish  <draft_id> --platforms xiaohongshu,juejin
+python3 $ACP/scripts/pipeline.py run-all  <草稿> --from ingest   # 一条龙
+python3 $ACP/scripts/pipeline.py status   # 看所有 draft 状态
 ```
 
 ### 2. Cron（系统调度）
 
-参考 `tests/install-cron.sh` —— scan 用周日 20:00，review 用每天 09:00，announce 模式让结果回推飞书。
+参考 `tests/install-cron.sh`：
+- ingest 扫描可挂周日 20:00（用 v1 留下来的 scan 子流程）
+- store→publish 可挂用户指定时间
 
 ### 3. Sub-agent（被其他 agent 调用）
 
-任意 agent 可以 `sessions_spawn` 一个子 agent，prompt 里写：
+任意 agent 可以 spawn 子 agent：
 
 ```
-请按 ~/.openclaw/workspace/skills/auto-content-pipeline/SKILL.md 执行 stage: <scan|review|write|cover|publish>。
-完成后回报：受影响 brief_id 列表、状态变更摘要、错误（如有）。
+请按 ~/.openclaw/workspace/skills/auto-content-pipeline/SKILL.md 执行 stage: <ingest|review|modify|illustrate|store|publish>。
+draft_id: <id>
+完成后回报：状态变更摘要、关键评分、产物路径。
 ```
 
-子 agent 读完 SKILL.md 自己就知道怎么干。
+## 配置/状态文件
 
-## 配置/状态文件（vault 真实路径）
+### Skill 端（workspace）
 
 ```
-~/Documents/Obsidian Vault/07-选题与发布/
-├── _config/
-│   ├── style-document.md    # 文档风格固化（标题套路、正文结构、emoji、长度、禁用词）
-│   ├── style-cover.md       # 封面风格固化（比例、配色、字体、布局）
-│   ├── style-config.yaml    # 账号定位 / 推送窗口 / 敏感词 / 源开关
-│   └── sources.json         # 热点源 URL 列表（小红书榜 / 微博热搜 / 知乎热榜 / twitter）
-├── _briefs/                 # 选题 brief（一个 .md 一份，frontmatter 含 status / score / source）
-├── _drafts/<brief_id>/      # 草稿 + 封面 + 文章 + 元信息
-├── _published/<brief_id>/   # 已发布归档
-├── _rejected/<brief_id>/    # 已拒绝归档
-├── _state.json              # 全局流水线状态（last_scan / last_review / last_publish / counters）
-└── _README.md               # vault 内的快速说明
+skills/auto-content-pipeline/
+├── SKILL.md
+├── config/default.yaml        # 全局配置（发布平台、风格模板路径、敏感词）
+├── prompts/                   # 每个 stage 的 prompt 模板
+│   ├── ingest.md
+│   ├── review.md
+│   ├── modify.md
+│   ├── illustrate.md
+│   ├── store.md
+│   └── publish.md
+├── scripts/                   # 9 个 stage + 工具脚本
+└── templates/style-templates/ # 公众号/网红/极客 风格模板（示例）
 ```
 
-## Brief frontmatter 约定
+### Vault 端（用户）
 
-```yaml
----
-id: 2026-08-24_iran-israel          # 简短 kebab，唯一
-created: 2026-08-24T20:03:11+08:00
-source: weibo-trending              # 来源
-status: pending_review             # pending_review | awaiting_user | approved | rejected | modified | awaiting_cover | awaiting_publish | published
-score: 8.4                          # LLM 评分（0-10）
-title: 伊朗对以色列发动大规模导弹袭击
-tags: [伊朗, 以色列, 中东, 国际新闻]
-deadline: 2026-08-25T18:00:00+08:00  # 时效性
-raw_link: https://...               # 原始链接
----
+```
+~/Documents/Obsidian Vault/
+├── 00-转型·一人事业/
+│   └── 04-原创写作专区/
+│       ├── 草稿/             ← ingest 来源（手动写）
+│       ├── 价值文章/         ← store 目标（打磨后可发）
+│       └── _config/style-templates/  # 风格模板（公众号/网红/极客）
+└── 07-选题与发布/            ← v1 留下来的 scan/brief 区，仍兼容
 ```
 
-## 风格规范（必须读）
+## Draft 状态机
 
-执行 write / cover stage 前**必读** `_config/style-document.md` 和 `_config/style-cover.md`，所有生成内容必须符合。这两份是 lin c 亲自审过的固化版本。
+```
+pending → ingest_done → reviewed → modified → illustrated → stored → published
+                                       ↓
+                                   failed（任意 stage 可失败）
+```
 
-修改风格规范前必须先跟 linc 确认 —— 不要自动改。
+## 风格模板（review 阶段必读）
 
-## 错误处理
+`templates/style-templates/` 目录下放 3 份风格规范：
+- `公众号.md` —— 长文 / 标题党 / 故事化开头 / 多段落 / 强 CTA
+- `网红.md` —— 短句 / emoji 多 / 情绪化 / 个人化视角 / 一句话金句
+- `极客.md` —— 技术准确 / 代码块 / 工具对比表 / 客观中立
 
-- **scan 抓不到数据**：重试 3 次后写 `_state.json.last_scan_error`，不在飞书推噪音
-- **publish 失败**：保留 `_drafts/` 不动，brief status 回退 `awaiting_publish`，下次重试
-- **图片生成失败**：保留 article，等手动触发 cover
+修改风格规范前必须跟 linc 确认 —— agent 不自动改。
 
-详细错误码见 `scripts/state.py` 顶部注释。
+## 发布平台（v2.0.0）
 
-## 调用前后检查清单
+| 平台       | 状态                | 实现方式                |
+|------------|---------------------|-------------------------|
+| 小红书     | ✅ 可用              | xiaohongshu_poster.py   |
+| 掘金       | 🚧 待配置 cookie    | juejin API              |
+| 少数派     | 🚧 待配置           | sspai API               |
+| 知乎       | 🚧 待配置           | zhihu API               |
+| 公众号     | ⏸ 待接入 API        | **不走浏览器**，等 AppID/AppSecret |
 
-✅ **调用前**：
-1. 读 `_config/style-config.yaml` 看账号定位
-2. 读 `_state.json` 看上次状态
-3. 读本次 stage 对应的 prompt 文件（`prompts/<stage>.md`）
+## v1 → v2 迁移
 
-✅ **调用后**：
-1. 写回 `_state.json`
-2. 该推飞书就推（review / publish 后）
-3. brief frontmatter status 必须更新
-
-## 集成
-
-- **xiaohongshu 发布**：`scripts/publish.py` 包装现有的 `~/.openclaw/workspace/xiaohongshu_poster.py post`，不直接动它
-- **LLM 调用**：scan/review/write/cover 都是 agent 自身跑（读 prompt 后调用工具）；不要试图装 gemini CLI 或外部 LLM
-- **图像生成**：cover stage 用 `image_generate` 工具（OpenClaw 原生）
-- **推送飞书**：review 后用 `message(action=send)` 推；不要扫其它 IM
+- v1 的 `auto-content-pipeline/SKILL.md` 已替换
+- v1 的 cron（acp-scan-weekly / acp-review-daily）已 disable
+- SkillHub 上 `auto-flow` 已升级到 v2.0.0
+- v1 的 vault 文件（07-选题与发布/）保留作为 scan 子流程的存储

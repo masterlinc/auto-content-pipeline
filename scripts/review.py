@@ -1,52 +1,76 @@
 #!/usr/bin/env python3
 """
-Stage 2: review — 复核 brief → 选 top N → 推送飞书
-
-工作模式：
-  agent 读到本文件后：
-    1. 读 prompts/review.md
-    2. 扫 _briefs/ status=pending_review 的
-    3. LLM 二次评分（结合当日热度变化）
-    4. 选 top N（默认 3），update_status → awaiting_user
-    5. 生成 daily-pick-YYYY-MM-DD.md 汇总（写到 _briefs/ 同级）
-    6. 推送飞书（用 message tool）让 linc 决策
-    7. 写 _state.json last_review
+Stage 2: review — 按 3 套风格模板打分
 """
 
 import sys
+import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from state import vault_root, load_state, save_state, touch, today_str, list_briefs, now_iso, record_error
-from brief import update_status
+from state import drafts_dir, read_draft, load_state, save_state, touch, now_iso
+
+
+def load_style_template(name: str) -> str:
+    """读 skill 自带的 templates/style-templates/*.md。"""
+    p = Path(__file__).resolve().parent.parent / "templates" / "style-templates" / f"{name}.md"
+    if not p.exists():
+        return ""
+    return p.read_text(encoding="utf-8")
 
 
 def main() -> int:
+    if len(sys.argv) < 2:
+        print("用法: pipeline.py review <draft_id>")
+        sys.exit(1)
+    draft_id = sys.argv[1]
+
+    try:
+        source_path, fm, body = read_draft(draft_id)
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        return 1
+
+    draft_dir = source_path.parent
+    review_path = draft_dir / "review.json"
+
+    print(f"\n=== review stage: {draft_id} ===")
+    print(f"title: {fm.get('title', '?')}")
+    print(f"字数: {fm.get('word_count', len(body))}")
+    print()
+    print(">>> 给 agent 的步骤：")
+    print("   1. 读 prompts/review.md 完整指令")
+    print("   2. 加载 3 个风格模板（公众号/网红/极客）")
+    print(f"   3. 读 source: {source_path}")
+    print(f"   4. LLM 按 6 维度 × 3 模板打分，输出 review.json 到 {review_path}")
+    print(f"   5. 选 primary_style（总分最高的模板）")
+    print(f"   6. 写回 review.json（格式见 prompts/review.md）")
+    print(f"   7. update_draft_status('{draft_id}', 'reviewed', reviewed_at=...)")
+
+    # 即使没真跑 LLM，也写个空 review.json 占位，让下一 stage 能继续
+    if not review_path.exists():
+        placeholder = {
+            "draft_id": draft_id,
+            "reviewed_at": now_iso(),
+            "scores": {
+                "gongzhonghao": {k: 7 for k in ["title", "opening", "structure", "rhythm", "cta", "platform_fit"]},
+                "wanghong": {k: 7 for k in ["title", "opening", "structure", "rhythm", "cta", "platform_fit"]},
+                "jike": {k: 7 for k in ["title", "opening", "structure", "rhythm", "cta", "platform_fit"]},
+            },
+            "weighted_total": 7.0,
+            "primary_style": "gongzhonghao",
+            "suggestions": [],
+            "status": "reviewed",
+            "note": "占位 review，等 LLM 真跑后覆盖",
+        }
+        review_path.write_text(json.dumps(placeholder, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n⚠️  写了占位 review.json，agent 真跑 LLM 后会覆盖")
+
     state = load_state()
     touch("review", state)
-
-    pending = [(p, fm) for p, fm in list_briefs("pending_review")]
-    print(f"\n=== review stage @ {now_iso()} ===")
-    print(f"pending briefs: {len(pending)}")
-
-    if not pending:
-        print("没有待复核 brief，跳过推送")
-        record_error(state, "E_REVIEW_EMPTY", "没有 pending_review brief")
-        save_state(state)
-        return 0
-
-    print(f"\n>>> 给 agent 的步骤：")
-    print(f"   1. 读 prompts/review.md")
-    print(f"   2. 读 _config/style-config.yaml 确认账号定位")
-    print(f"   3. web_search 复核 {len(pending)} 个 brief 的当前热度（24h 内是否还热）")
-    print(f"   4. LLM 重新评分，挑 top {state.get('review_top_n', 3)}")
-    print(f"   5. 对每个选中的 brief 调 update_status(brief_id, 'awaiting_user', score=new_score)")
-    print(f"   6. 未选中的：status 保持 pending_review（明早 review 再看）")
-    print(f"   7. 生成 _briefs/daily-pick-{today_str()}.md 汇总")
-    print(f"   8. 推送飞书：用 message tool，内容参考 prompts/confirm-message.md")
-    print(f"   9. save_state(state) — last_review 已写")
+    save_state(state)
     return 0
 
 

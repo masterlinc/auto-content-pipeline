@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
 """
-Vault 状态 I/O + 全局 helper。
+v2 vault state I/O。
 
-错误码（写到 _state.json 的 errors 字段）：
-  E_SCAN_NO_SOURCE       scan 阶段所有源都失败
-  E_SCAN_RATE_LIMIT      某个源被限流
-  E_REVIEW_EMPTY         review 时没有 pending brief
-  E_WRITE_STYLE_MISSING  风格文件不存在
-  E_COVER_GEN_FAIL       image_generate 失败
-  E_PUBLISH_LOGIN        xiaohongshu 没登录
-  E_PUBLISH_UI_DRIFT     小红书 UI 改了，selector 找不到（要修 xiaohongshu_poster.py）
+draft 状态机：
+  pending → ingest_done → reviewed → modified → illustrated → stored → published
+                                                  ↓
+                                              failed（任意 stage 可失败）
 """
 
 import json
 import os
-import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, List, Tuple
 
-DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault" / "07-选题与发布"
-TZ_OFFSET = "+08:00"
+DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault"
+DRAFTS_DIR = DEFAULT_VAULT / "00-转型·一人事业" / "04-原创写作专区" / "草稿"
+VALUE_DIR = DEFAULT_VAULT / "00-转型·一人事业" / "04-原创写作专区" / "价值文章"
+LEGACY_BRIEFS = DEFAULT_VAULT / "07-选题与发布" / "_briefs"
 
 
 def now_iso() -> str:
@@ -32,36 +29,41 @@ def today_str() -> str:
 
 
 def vault_root() -> Path:
-    """读 config/user.yaml 优先，否则 default.yaml，最后默认路径。"""
     cfg = Path(__file__).resolve().parent.parent / "config"
     for name in ("user.yaml", "default.yaml"):
         p = cfg / name
         if p.exists():
             for line in p.read_text(encoding="utf-8").splitlines():
-                m = re.match(r"^\s*root:\s*(.+)$", line)
-                if m:
-                    raw = m.group(1).strip().strip('"').strip("'")
-                    return Path(os.path.expanduser(raw))
+                if line.strip().startswith("value_dir:"):
+                    raw = line.split(":", 1)[1].strip().strip('"').strip("'")
+                    return Path(os.path.expanduser(raw)).parent.parent.parent
     return DEFAULT_VAULT
 
 
+def drafts_dir() -> Path:
+    """skill 内部 _drafts/ 目录（在 skill 安装目录下，不在 vault）。"""
+    p = Path(__file__).resolve().parent.parent / "_drafts"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def state_file() -> Path:
-    return vault_root() / "_state.json"
+    return drafts_dir() / "_state.json"
 
 
 def load_state() -> dict:
     p = state_file()
     if not p.exists():
         return {
-            "version": 1,
-            "last_scan": None,
+            "version": 2,
+            "last_ingest": None,
             "last_review": None,
             "last_publish": None,
             "counters": {
-                "scanned_total": 0,
-                "briefs_total": 0,
+                "drafts_total": 0,
+                "reviewed_total": 0,
                 "published_total": 0,
-                "rejected_total": 0,
+                "failed_total": 0,
             },
             "errors": [],
         }
@@ -79,10 +81,7 @@ def save_state(state: dict) -> None:
 
 def record_error(state: dict, code: str, msg: str) -> None:
     state.setdefault("errors", [])
-    state["errors"].append(
-        {"code": code, "msg": msg, "at": now_iso()}
-    )
-    # 只保留最近 20 条
+    state["errors"].append({"code": code, "msg": msg, "at": now_iso()})
     state["errors"] = state["errors"][-20:]
 
 
@@ -90,10 +89,7 @@ def touch(stage: str, state: dict) -> None:
     state[f"last_{stage}"] = now_iso()
 
 
-# ======== brief frontmatter 工具 ========
-
-def parse_frontmatter(text: str) -> tuple[dict, str]:
-    """返回 (frontmatter_dict, body_str)。支持 --- 包裹的 YAML-ish 简单格式。"""
+def parse_frontmatter(text: str) -> Tuple[dict, str]:
     if not text.startswith("---\n"):
         return {}, text
     end = text.find("\n---\n", 4)
@@ -110,7 +106,7 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
         if line.startswith("  - ") and current_list_key:
             fm[current_list_key].append(line[4:].strip().strip('"').strip("'"))
             continue
-        m = re.match(r"^([\w_-]+):\s*(.*)$", line)
+        m = __import__("re").match(r"^([\w_-]+):\s*(.*)$", line)
         if not m:
             continue
         key, val = m.group(1), m.group(2).strip()
@@ -128,7 +124,6 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def dump_frontmatter(fm: dict) -> str:
-    """把 dict 序列化成 --- 包裹的 frontmatter。"""
     lines = ["---"]
     for k, v in fm.items():
         if isinstance(v, list):
@@ -144,34 +139,46 @@ def dump_frontmatter(fm: dict) -> str:
     return "\n".join(lines)
 
 
-def read_brief(brief_id: str) -> tuple[Path, dict, str]:
-    """找到 brief 文件，返回 (path, frontmatter, body)。"""
-    root = vault_root() / "_briefs"
-    matches = list(root.glob(f"{brief_id}*.md"))
-    if not matches:
-        raise FileNotFoundError(f"brief not found: {brief_id}")
-    p = matches[0]
+def read_draft(draft_id: str) -> Tuple[Path, dict, str]:
+    """找 draft 目录里的 source.md，返回 (path, frontmatter, body)。"""
+    root = drafts_dir() / draft_id
+    if not root.exists():
+        raise FileNotFoundError(f"draft not found: {draft_id}")
+    p = root / "source.md"
+    if not p.exists():
+        raise FileNotFoundError(f"source.md not found in {root}")
     text = p.read_text(encoding="utf-8")
     fm, body = parse_frontmatter(text)
     return p, fm, body
 
 
-def write_brief(path: Path, fm: dict, body: str) -> None:
-    text = dump_frontmatter(fm) + "\n\n" + body.lstrip()
-    path.write_text(text, encoding="utf-8")
+def update_draft_status(draft_id: str, new_status: str, **extra) -> Path:
+    """更新 draft 的 source.md 的 frontmatter status 字段。"""
+    root = drafts_dir() / draft_id
+    source = root / "source.md"
+    fm, body = parse_frontmatter(source.read_text(encoding="utf-8"))
+    fm["status"] = new_status
+    fm["updated"] = now_iso()
+    for k, v in extra.items():
+        fm[k] = v
+    source.write_text(dump_frontmatter(fm) + "\n\n" + body.lstrip(), encoding="utf-8")
+    return source
 
 
-def list_briefs(status=None):  # Optional[str]
-    root = vault_root() / "_briefs"
+def list_drafts(status: Optional[str] = None) -> List[Tuple[Path, dict]]:
+    root = drafts_dir()
     out = []
-    for p in sorted(root.glob("*.md")):
-        fm, _ = parse_frontmatter(p.read_text(encoding="utf-8"))
+    for d in sorted(root.glob("draft-*")):
+        source = d / "source.md"
+        if not source.exists():
+            continue
+        fm, _ = parse_frontmatter(source.read_text(encoding="utf-8"))
         if status is None or fm.get("status") == status:
-            out.append((p, fm))
+            out.append((d, fm))
     return out
 
 
 if __name__ == "__main__":
-    # smoke test
     print("vault:", vault_root())
+    print("drafts_dir:", drafts_dir())
     print("state:", load_state())

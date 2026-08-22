@@ -1,48 +1,92 @@
-# auto-content-pipeline 默认配置
-# linc 可以改 ~/.openclaw/workspace/skills/auto-content-pipeline/config/user.yaml 覆盖
+# auto-content-pipeline v2 默认配置
 
 vault:
-  root: ~/Documents/Obsidian Vault/07-选题与发布
+  # ingest 来源：用户手动写的草稿
+  drafts_dir: ~/Documents/Obsidian Vault/00-转型·一人事业/04-原创写作专区/草稿
+  # store 目标：打磨好的"价值文章"
+  value_dir: ~/Documents/Obsidian Vault/00-转型·一人事业/04-原创写作专区/价值文章
+  # scan 子流程存储（v1 兼容）
+  legacy_briefs_dir: ~/Documents/Obsidian Vault/07-选题与发布/_briefs
+  legacy_drafts_dir: ~/Documents/Obsidian Vault/07-选题与发布/_drafts
 
-xiaohongshu:
-  poster_script: ~/.openclaw/workspace/xiaohongshu_poster.py
-  article_file: ~/.openclaw/workspace/article_to_post.txt
-  cookies_file: ~/.openclaw/workspace/xiaohongshu_cookies.json
-
-scan:
-  # scan 时用哪些源（sources.json 详细定义）
-  sources:
-    - weibo-trending
-    - xiaohongshu-hot
-    - zhihu-hot
-    - twitter-trending
-    - rss:bbc-world
-    - rss:reuters-top
-  max_briefs: 8                # 每次 scan 最多产出多少 brief
-  duplicate_window_days: 7     # 几天内的同主题 brief 当作重复
-  deadline_hours: 36           # brief 默认时效
+style_templates:
+  dir: templates/style-templates
+  # 3 个必选模板
+  gongzhonghao: 公众号.md
+  wanghong: 网红.md
+  jike: 极客.md
 
 review:
-  top_n: 3                     # review 后给 linc 看几个
-  push_to: feishu              # 推送渠道
-  push_window: "09:00-09:30"   # 推送窗口（cron schedule 已经卡了，这只是 hint）
+  # 每个模板的权重（总分 = 加权和）
+  weights:
+    gongzhonghao: 0.4
+    wanghong: 0.3
+    jike: 0.3
+  # 评分低于这个分数的维度会被 mark 为"必须改"
+  min_dim_score: 6.0
+  # review 阶段最多返回多少条改稿建议
+  max_suggestions: 10
 
-write:
-  style_file: _config/style-document.md
-  word_count: [300, 700]       # 目标长度区间
-  emoji_density: medium        # low | medium | high
+modify:
+  # modify 阶段是否允许重写整段
+  allow_rewrite: true
+  # 是否保留原稿作为 reference
+  keep_original: true
+  # 改动超过这个比例的段落视为重写（提示用户）
+  rewrite_threshold: 0.6
 
-cover:
-  style_file: _config/style-cover.md
-  aspect: "3:4"                # 小红书封面 3:4
-  size: "1242x1660"
-  provider: openai             # 走 OpenClaw 的 image_generate
+illustrate:
+  cover:
+    aspect: "3:4"
+    size: "1242x1660"
+    provider: openai
+    style_file: templates/style-templates/cover-default.md
+  body_images:
+    count: 2      # 正文配图数量
+    style: minimal-diagram  # minimal-diagram | flat-illustration | screenshot
+    placement: after_each_section  # after_each_section | inline_with_text
+
+store:
+  # store 时是否覆盖同名目录
+  overwrite: false
+  # 是否在 vault 价值文章目录生成 _index.md
+  update_index: true
 
 publish:
-  auto_after_cover: true       # cover 完后是否自动发布（默认 true）
-  require_linc_double_check: false  # 发布前还要再人工看一眼吗
+  # 可用平台
+  platforms:
+    xiaohongshu:
+      enabled: true
+      method: xiaohongshu_poster
+      script: ~/.openclaw/workspace/xiaohongshu_poster.py
+    juejin:
+      enabled: false         # 需配置 cookie
+      method: api
+      api_base: https://api.juejin.cn
+      auth: cookie
+    sspai:
+      enabled: false         # 少数派，需登录态
+      method: api
+      api_base: https://sspai.com/api
+      auth: cookie
+    zhihu:
+      enabled: false         # 知乎，需登录态
+      method: api
+      api_base: https://www.zhihu.com/api/v4
+      auth: cookie
+    gongzhonghao:
+      enabled: false         # ⏸ 等待 AppID/AppSecret，**不走浏览器**
+      method: api
+      api_base: https://api.weixin.qq.com/cgi-bin
+      auth: appid_appsecret
+      pending_credentials: true
+  # 默认发布平台列表
+  default_platforms: [xiaohongshu]
+  # 发布前是否需要用户最后确认
+  require_human_approval: true
 
 cron:
-  scan: "0 20 * * 0"           # 周日 20:00
-  review: "0 9 * * *"          # 每天 09:00
+  # v2 默认不跑定时，user-triggered 为主
+  scan_legacy: false   # v1 的 scan 是否还跑
+  review_daily: false  # v1 的 review 是否还跑
   tz: Asia/Shanghai

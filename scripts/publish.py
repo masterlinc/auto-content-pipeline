@@ -1,110 +1,167 @@
 #!/usr/bin/env python3
 """
-Stage 6: publish — 发布到小红书
+Stage 6: publish — 多平台分发
 
-包装现有的 ~/.openclaw/workspace/xiaohongshu_poster.py：
-  - 把 _drafts/<id>/article.md 转成 article_to_post.txt 格式
-  - 把 _drafts/<id>/cover.png 复制到 ~/.openclaw/workspace/article_cover.png
-  - 调 xiaohongshu_poster.py post
-  - 移到 _published/<id>/
-
-不直接改 xiaohongshu_poster.py —— 那是另一份独立脚本，
-我们只通过文件接口集成。
+支持的平台：
+  - xiaohongshu: ✅ xiaohongshu_poster.py
+  - juejin:       🚧 待配置 cookie
+  - sspai:        🚧 待配置
+  - zhihu:        🚧 待配置
+  - gongzhonghao: ⏸ 待 API（**不走浏览器**），等 linc 给 AppID/AppSecret
 """
 
-import os
+import sys
+import json
 import shutil
 import subprocess
-import sys
-from datetime import datetime
 from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+from state import (
+    drafts_dir, read_draft, load_state, save_state, touch, now_iso, record_error,
+    DEFAULT_VAULT,
+)
 
 HOME = Path.home()
 POSTER = HOME / ".openclaw" / "workspace" / "xiaohongshu_poster.py"
 ARTICLE_TXT = HOME / ".openclaw" / "workspace" / "article_to_post.txt"
-COVER_HINT = HOME / ".openclaw" / "workspace" / "article_cover.png"
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from state import vault_root, load_state, save_state, touch, record_error, now_iso
-from brief import update_status, archive
+VALUE_DIR = DEFAULT_VAULT / "00-转型·一人事业" / "04-原创写作专区" / "价值文章"
 
 
-def format_for_poster(article_md: Path, title: str, tags: list[str]) -> str:
-    """把 .md 转成 xiaohongshu_poster.py 认识的格式。
+PLATFORM_STATUS = {
+    "xiaohongshu": "✅",
+    "juejin": "🚧",
+    "sspai": "🚧",
+    "zhihu": "🚧",
+    "gongzhonghao": "⏸",
+}
 
-    xiaohongshu_poster.py 的逻辑：
-      - 如果含 '---'，split 后第一段是标题，后面是正文
-      - 否则前 30 字当标题，全文当正文
-    """
-    body = article_md.read_text(encoding="utf-8")
-    # 去 frontmatter
-    if body.startswith("---"):
-        end = body.find("\n---\n", 4)
+
+def publish_xiaohongshu(stored_dir: Path, meta: dict) -> dict:
+    """包装 xiaohongshu_poster.py 发布。"""
+    article = stored_dir / "article.md"
+    if not article.exists():
+        return {"ok": False, "error": "article.md 不存在"}
+
+    text = article.read_text(encoding="utf-8")
+    if text.startswith("---"):
+        end = text.find("\n---\n", 4)
         if end > 0:
-            body = body[end + 5:]
+            text = text[end + 5:]
 
-    # 把标题拼在前面 + ---
+    title = meta.get("title", "未命名")
+    body = text
+    tags = meta.get("tags", [])
+
     parts = [f"# {title}", "---", body.strip()]
     if tags:
         parts.append("")
         parts.append(" ".join(f"#{t}" for t in tags))
-    return "\n".join(parts)
+    ARTICLE_TXT.write_text("\n".join(parts), encoding="utf-8")
+
+    cover = stored_dir / "cover.png"
+    if cover.exists():
+        shutil.copy(cover, HOME / ".openclaw" / "workspace" / "article_cover.png")
+
+    result = subprocess.run(["python3", str(POSTER), "post"], cwd=POSTER.parent, capture_output=True, text=True)
+    return {
+        "ok": result.returncode == 0,
+        "returncode": result.returncode,
+        "stdout": result.stdout[-500:] if result.stdout else "",
+        "stderr": result.stderr[-500:] if result.stderr else "",
+    }
+
+
+def publish_juejin(stored_dir: Path, meta: dict) -> dict:
+    """占位：等配置 cookie。"""
+    return {"ok": False, "error": "掘金待配置 cookie（juejin API 需要 JUEJIN_SESSION）"}
+
+
+def publish_sspai(stored_dir: Path, meta: dict) -> dict:
+    return {"ok": False, "error": "少数派待配置登录态"}
+
+
+def publish_zhihu(stored_dir: Path, meta: dict) -> dict:
+    return {"ok": False, "error": "知乎待配置 z_c0 token"}
+
+
+def publish_gongzhonghao(stored_dir: Path, meta: dict) -> dict:
+    return {"ok": False, "error": "公众号待 API 凭证（等 AppID/AppSecret，**不走浏览器**）"}
 
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("用法: pipeline.py publish <brief_id>")
+        print("用法: pipeline.py publish <draft_id> [--platforms xiaohongshu,juejin]")
+        sys.exit(1)
+    draft_id = sys.argv[1]
+
+    platforms = ["xiaohongshu"]
+    for arg in sys.argv[2:]:
+        if arg.startswith("--platforms="):
+            platforms = arg.split("=", 1)[1].split(",")
+
+    stored_dir = VALUE_DIR / draft_id
+    if not stored_dir.exists():
+        print(f"❌ vault 价值文章区不存在: {stored_dir}")
+        print(f"   先跑 store stage")
         return 1
-    brief_id = sys.argv[1]
+
+    meta_path = stored_dir / "meta.json"
+    meta = {}
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    print(f"\n=== publish stage: {draft_id} ===")
+    print(f"title: {meta.get('title', '?')}")
+    print(f"platforms: {platforms}")
+    print()
+
+    publish_handlers = {
+        "xiaohongshu": publish_xiaohongshu,
+        "juejin": publish_juejin,
+        "sspai": publish_sspai,
+        "zhihu": publish_zhihu,
+        "gongzhonghao": publish_gongzhonghao,
+    }
+
+    results = {}
+    for p in platforms:
+        status = PLATFORM_STATUS.get(p, "?")
+        print(f"  [{status}] {p} ...", end=" ", flush=True)
+        handler = publish_handlers.get(p)
+        if not handler:
+            print(f"❌ 未知平台")
+            results[p] = {"ok": False, "error": "未知平台"}
+            continue
+        r = handler(stored_dir, meta)
+        results[p] = r
+        if r.get("ok"):
+            print(f"✅")
+        else:
+            print(f"❌ {r.get('error', r.get('stderr', '失败'))}")
+
+    # 更新 meta.json
+    published = meta.get("published_platforms", [])
+    for p, r in results.items():
+        if r.get("ok"):
+            published.append({"platform": p, "url": r.get("url", ""), "published_at": now_iso()})
+    meta["published_platforms"] = published
+    meta["publish_status"] = "published" if all(r.get("ok") for r in results.values()) else "partially_published" if any(r.get("ok") for r in results.values()) else "failed"
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"\n📊 结果汇总：")
+    for p, r in results.items():
+        icon = "✅" if r.get("ok") else "❌"
+        print(f"  {icon} {p}: {r.get('error') or r.get('url') or 'OK'}")
 
     state = load_state()
-
-    draft_dir = vault_root() / "_drafts" / brief_id
-    article_md = draft_dir / "article.md"
-    cover_png = draft_dir / "cover.png"
-
-    if not article_md.exists():
-        print(f"❌ 找不到 {article_md}")
-        record_error(state, "E_PUBLISH_NO_ARTICLE", brief_id)
-        save_state(state)
-        return 1
-
-    if not cover_png.exists():
-        print(f"⚠️  找不到 {cover_png}，没封面能发，但可以试试纯文")
-
-    # 读 brief frontmatter 拿 title 和 tags
-    from state import read_brief
-    _, fm, _ = read_brief(brief_id)
-    title = fm.get("title", "未命名")
-    tags = fm.get("tags") or []
-
-    # 1. 写 article_to_post.txt
-    text = format_for_poster(article_md, title, tags)
-    ARTICLE_TXT.write_text(text, encoding="utf-8")
-    print(f"📝 已写 {ARTICLE_TXT}")
-
-    # 2. 复制封面
-    if cover_png.exists():
-        shutil.copy(cover_png, COVER_HINT)
-        print(f"🖼️  已复制封面到 {COVER_HINT}")
-
-    # 3. 调 xiaohongshu_poster.py post
-    print(f"🚀 调 xiaohongshu_poster.py post ...")
-    result = subprocess.run(["python3", str(POSTER), "post"], cwd=POSTER.parent)
-    if result.returncode != 0:
-        print(f"❌ xiaohongshu_poster 返回 {result.returncode}")
-        record_error(state, "E_PUBLISH_FAILED", brief_id)
-        save_state(state)
-        return 1
-
-    # 4. 归档
-    archive(brief_id, "_published")
-    update_status(brief_id, "published", published_at=now_iso())
     touch("publish", state)
-    state["counters"]["published_total"] = state["counters"].get("published_total", 0) + 1
+    if any(r.get("ok") for r in results.values()):
+        state["counters"]["published_total"] = state["counters"].get("published_total", 0) + 1
     save_state(state)
-
-    print(f"\n✅ {brief_id} 已发布并归档到 _published/")
     return 0
 
 
