@@ -90,3 +90,34 @@ cron:
   scan_legacy: false   # v1 的 scan 是否还跑
   review_daily: false  # v1 的 review 是否还跑
   tz: Asia/Shanghai
+
+# v2.1: 飞书云文档审阅循环
+feishu:
+  # 审阅人 chat_id（飞书 P2P/群 chat_id）
+  # 二选一填一个；推荐填 reviewer_chat_id（稳定）
+  reviewer_chat_id: ""          # 例如: oc_xxxx
+  reviewer_user_open_id: ""     # 备选: ou_xxxx（脚本会自动解析成 chat_id）
+
+  # 云空间根目录下的"审核中"文件夹路径
+  audit_folder: "auto-content-pipeline/审核中"
+
+  # 云文档标题前缀
+  title_prefix: "📝 审阅:"
+
+  # dry-run 模式（只打印不实际推送）
+  dry_run: false
+
+  # 飞书评论识别关键词（按需调整）
+  pass_keywords:
+    - "确认发布"
+    - "通过"
+    - "approved"
+    - "approve"
+    - "ok 发布"
+  reject_keywords:
+    - "打回"
+    - "重写"
+    - "退回"
+    - "reject"
+    - "不通过"
+    - "重新"

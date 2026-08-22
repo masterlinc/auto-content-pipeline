@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """
-pipeline.py — CLI 入口（v2，回退版）
+pipeline.py — CLI 入口（v2.1）
 
 默认走 v2 stage 脚本（直接调 Python）。
 v3 Codex Harness 作为**可选**（设 ACP_USE_CODEX=1 启用）。
+
+v2.1 新增 2 个 stage：
+  - sync-feishu       把打磨好的文章推到飞书云文档 + 发 IM 卡片
+  - feishu-review     拉飞书云文档评论，分类 + 更新 status
+
+完整 7 阶段流程：
+  ingest → review → modify → illustrate → store
+    → sync-feishu → feishu-review
+      → (loop: modify → sync-feishu → feishu-review)
+      → publish
 
 用法：
   pipeline.py ingest <草稿.md>
@@ -12,6 +22,8 @@ v3 Codex Harness 作为**可选**（设 ACP_USE_CODEX=1 启用）。
   pipeline.py modify <draft_id>
   pipeline.py illustrate <draft_id>
   pipeline.py store <draft_id>
+  pipeline.py sync-feishu <draft_id>     # v2.1 新增
+  pipeline.py feishu-review <draft_id>    # v2.1 新增
   pipeline.py publish <draft_id> [--platforms xiaohongshu,juejin]
   pipeline.py run-all <草稿.md>
   pipeline.py status
@@ -43,6 +55,8 @@ def run_v2(stage: str, draft_id: str, *extra) -> int:
         "modify": "modify.py",
         "illustrate": "illustrate.py",
         "store": "store.py",
+        "sync-feishu": "feishu_sync.py",
+        "feishu-review": "feishu_review.py",
         "publish": "publish.py",
     }
     script = script_map.get(stage)
@@ -90,9 +104,10 @@ def cmd_status() -> int:
 
 
 def cmd_run_all(ingest_arg: str) -> int:
-    """从 ingest 一条龙到 store。"""
+    """从 ingest 一条龙到 store（v2.1 不再自动跑 sync-feishu/publish，留给人审）。"""
     print(f"⚠️  run-all: ingest → review → modify → illustrate → store")
-    print(f"   publish 单独跑，避免误发")
+    print(f"   v2.1: 后面 sync-feishu → feishu-review → (loop) → publish")
+    print(f"         都手动跑，保留人工审核环节")
     print()
 
     # ingest 总是用 v2（轻量）
@@ -116,7 +131,10 @@ def cmd_run_all(ingest_arg: str) -> int:
             print(f"❌ {stage} {draft_id} 失败，停止")
             return 1
     print(f"\n✅ 一条龙完成。draft_id = {draft_id}")
-    print(f"   下一步：python3 $ACP/scripts/pipeline.py publish {draft_id} --platforms xiaohongshu")
+    print(f"   下一步：")
+    print(f"   1) python3 $ACP/scripts/pipeline.py sync-feishu {draft_id}")
+    print(f"   2) 等飞书云文档评论 → python3 $ACP/scripts/pipeline.py feishu-review {draft_id}")
+    print(f"   3) 通过后 → python3 $ACP/scripts/pipeline.py publish {draft_id} --platforms xiaohongshu")
     return 0
 
 
@@ -157,6 +175,16 @@ def main() -> int:
             print("用法: pipeline.py store <draft_id>")
             return 1
         return runner("store", args[0])
+    elif cmd in ("sync-feishu", "feishu-sync"):
+        if not args:
+            print("用法: pipeline.py sync-feishu <draft_id>")
+            return 1
+        return runner("sync-feishu", args[0])
+    elif cmd in ("feishu-review", "feishu-feedback"):
+        if not args:
+            print("用法: pipeline.py feishu-review <draft_id>")
+            return 1
+        return runner("feishu-review", args[0])
     elif cmd == "publish":
         if not args:
             print("用法: pipeline.py publish <draft_id> [--platforms xiaohongshu,juejin]")

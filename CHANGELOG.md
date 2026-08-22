@@ -1,5 +1,64 @@
 # Changelog
 
+## 2.1.0 — 2026-08-23
+
+**飞书云文档审核循环**：store → publish 中间加一道人工审核墙。
+
+### 新增
+
+- **Stage 6: `sync-feishu`**（`scripts/feishu_sync.py`）
+  - 把 vault 价值文章区里的 article.md 推到飞书云空间 `auto-content-pipeline/审核中/`
+  - 通过飞书 IM 发卡片给审阅人
+  - 走 `lark-cli`（不绑定任何 agent 工具）
+  - 输出 doc_token / doc_url，写回 frontmatter
+
+- **Stage 7: `feishu-review`**（`scripts/feishu_review.py`）
+  - 拉飞书云文档评论（`lark-cli drive +list-comments`）
+  - 按 `last_seen_comment_id` 过滤新评论
+  - 分类：`pass`（含"确认发布"/"通过"） / `reject`（含"打回"/"重写"） / `suggestion`（其他）
+  - 输出 JSON 给 agent：verdict / suggestions / next_action
+
+- **Prompt 契约**：
+  - `prompts/sync-feishu.md` — 任何 agent 怎么跑这个 stage
+  - `prompts/review-loop.md` — 循环审核的状态机 + 步骤
+
+- **状态机扩展**（`scripts/state.py`）：
+  - 新增状态：`feishu_sync_pending` / `feishu_synced` / `feishu_review_pending` / `feishu_review_modifying` / `feishu_review_syncing` / `feishu_review_passed`
+  - 新增 frontmatter 字段：`feishu_doc_token` / `feishu_doc_url` / `feishu_synced_at` / `review_round` / `last_seen_comment_id` / `last_reviewed_at` / `last_review_verdict`
+  - 新增工具函数：`set_feishu_doc` / `bump_review_round` / `classify_feishu_comment`
+
+- **配置段**（`config/default.yaml`）：
+  - 新增 `feishu` 段：reviewer_chat_id / audit_folder / pass_keywords / reject_keywords
+
+### 变更
+
+- **`SKILL.md`**：7 阶段流程图 + 飞书审核循环契约 + 通用 agent 调用约定
+- **`README.md`**：同步 v2.1 描述 + 文件地图
+- **`pipeline.py`**：注册 `sync-feishu` / `feishu-review` 两个 stage
+- **`state.py`**：状态机扩展
+
+### 设计原则
+
+- **不绑定任何 agent**——所有 stage 用 `lark-cli` + `python3` 实现
+- **不绑定任何 harness**——v3 Codex Harness / v2 stage 脚本 / 对话驱动 都可触发
+- **状态机驱动**——所有状态写在 frontmatter，任何 agent 都能解析
+- **对话驱动循环**——loop 由 agent 根据 verdict 触发，不依赖长连接/cron
+
+### 升级要点
+
+```bash
+# 1. 配 config/default.yaml
+#    feishu.reviewer_chat_id: oc_xxxx
+#
+# 2. 确认 lark-cli 已认证
+lark-cli auth status
+#
+# 3. 升级后跑法：
+python3 pipeline.py sync-feishu <draft_id>      # 推飞书
+python3 pipeline.py feishu-review <draft_id>     # 拉评论
+# 输出 JSON → agent 按 verdict 决定 modify/publish
+```
+
 ## 2.0.0 — 2026-08-23
 
 **回退到 v2**（v3 Codex Harness 集成暂缓）。

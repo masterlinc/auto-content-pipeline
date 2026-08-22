@@ -2,8 +2,25 @@
 """
 v2 vault state I/O。
 
-draft 状态机：
-  pending → ingest_done → reviewed → modified → illustrated → stored → published
+draft 状态机（v2.1 加飞书审核循环）：
+
+  ingest_done → reviewed → modified → illustrated → stored
+                                                       ↓
+                                            feishu_sync_pending
+                                                       ↓
+                                            feishu_synced
+                                                       ↓
+                                            feishu_review_pending
+                                                       ↓  (有评论)
+                                            feishu_review_modifying
+                                                       ↓
+                                            feishu_review_syncing
+                                                       ↓
+                                            feishu_review_pending  ← loop
+                                                       ↓  ("确认发布")
+                                            feishu_review_passed
+                                                       ↓
+                                            publish_pending → published
                                                   ↓
                                               failed（任意 stage 可失败）
 """
@@ -18,6 +35,22 @@ DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault"
 DRAFTS_DIR = DEFAULT_VAULT / "00-转型·一人事业" / "04-原创写作专区" / "草稿"
 VALUE_DIR = DEFAULT_VAULT / "00-转型·一人事业" / "04-原创写作专区" / "价值文章"
 LEGACY_BRIEFS = DEFAULT_VAULT / "07-选题与发布" / "_briefs"
+
+# v2.1: 飞书云空间根目录下"审核中"文件夹路径
+FEISHU_AUDIT_FOLDER = "auto-content-pipeline/审核中"
+
+# v2.1: 状态常量
+STATUSES = {
+    "ingest_done", "reviewed", "modified", "illustrated", "stored",
+    "feishu_sync_pending", "feishu_synced",
+    "feishu_review_pending", "feishu_review_modifying",
+    "feishu_review_syncing", "feishu_review_passed",
+    "publish_pending", "published", "failed",
+}
+
+# v2.1: 评论关键词识别
+FEISHU_PASS_KEYWORDS = ["确认发布", "通过", "approved", "approve", "✅", "ok 发布", "OK 发布"]
+FEISHU_REJECT_KEYWORDS = ["打回", "重写", "退回", "reject", "不通过", "重新"]
 
 
 def now_iso() -> str:
@@ -163,6 +196,69 @@ def update_draft_status(draft_id: str, new_status: str, **extra) -> Path:
         fm[k] = v
     source.write_text(dump_frontmatter(fm) + "\n\n" + body.lstrip(), encoding="utf-8")
     return source
+
+
+# ====== v2.1: 飞书相关 frontmatter 字段 ======
+
+def set_feishu_doc(draft_id: str, doc_token: str, doc_url: str = "") -> Path:
+    """记录飞书云文档 token（同步成功后调用）。"""
+    root = drafts_dir() / draft_id
+    source = root / "source.md"
+    fm, body = parse_frontmatter(source.read_text(encoding="utf-8"))
+    fm["feishu_doc_token"] = doc_token
+    if doc_url:
+        fm["feishu_doc_url"] = doc_url
+    fm["feishu_synced_at"] = now_iso()
+    source.write_text(dump_frontmatter(fm) + "\n\n" + body.lstrip(), encoding="utf-8")
+    return source
+
+
+def get_feishu_doc_token(draft_id: str) -> Optional[str]:
+    """从 frontmatter 拿已存在的飞书 doc_token，没有就返回 None。"""
+    try:
+        _, fm, _ = read_draft(draft_id)
+    except FileNotFoundError:
+        return None
+    return fm.get("feishu_doc_token")
+
+
+def bump_review_round(draft_id: str) -> int:
+    """审核轮数 +1，返回新轮数。"""
+    root = drafts_dir() / draft_id
+    source = root / "source.md"
+    fm, body = parse_frontmatter(source.read_text(encoding="utf-8"))
+    n = int(fm.get("review_round", 0)) + 1
+    fm["review_round"] = n
+    fm["last_reviewed_at"] = now_iso()
+    source.write_text(dump_frontmatter(fm) + "\n\n" + body.lstrip(), encoding="utf-8")
+    return n
+
+
+def get_review_round(draft_id: str) -> int:
+    try:
+        _, fm, _ = read_draft(draft_id)
+    except FileNotFoundError:
+        return 0
+    return int(fm.get("review_round", 0))
+
+
+def classify_feishu_comment(text: str) -> str:
+    """
+    把飞书评论分类：'pass' / 'reject' / 'suggestion'
+
+    规则：
+      - 含 PASS_KEYWORDS 任一 → pass
+      - 含 REJECT_KEYWORDS 任一 → reject
+      - 其他 → suggestion（默认按"打回"处理，含具体修改意见）
+    """
+    t = text.strip().lower()
+    for kw in FEISHU_PASS_KEYWORDS:
+        if kw.lower() in t:
+            return "pass"
+    for kw in FEISHU_REJECT_KEYWORDS:
+        if kw.lower() in t:
+            return "reject"
+    return "suggestion"
 
 
 def list_drafts(status: Optional[str] = None) -> List[Tuple[Path, dict]]:
