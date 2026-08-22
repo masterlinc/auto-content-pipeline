@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.0.0+2 — 2026-08-22
+
+### dankoe 风格模板升级
+
+- 互联网搜 AutoTweet / YouMind / Behance 的 Dan Koe 风格综合
+- `templates/style-templates/dankoe.md`：
+  - Part 1 视觉：配色 4 色 / 字体 3 套 / 5 排版模板 / 尺寸 4 平台
+  - Part 2 写作：5 个核心模式（modern-monk / OPC specificity / identity-shift hook / 长线程 / 日常栈揭示）+ 3-beat 结构
+  - Part 3 选模板逻辑：dankoe vs 极客 vs 网红 vs 公众号
+  - 明确禁用项（emoji 大图、暖色、3D、木刻风等）
+  - review 阶段加分项（identity-shift hook +0.5、philosophy+tactic 双层 +0.5）
+
+- SKILL.md：风格模板区重排，dankoe 默认高亮（带 ⭐ 标记 + 来源说明）
+
+## 2.0.0+1 — 2026-08-22
+
+- 锁定 dankoe 风格为 illustrate 默认模板
+- 新增 `templates/style-templates/dankoe.md`（2929 字节通用版）
+- SKILL.md 加 dankoe 默认说明
+- `prompts/illustrate.md` 加选模板逻辑
+
 ## 2.0.0 — 2026-08-22
 
 **重大架构变更**：从"内容工厂"转"打磨工坊"。

@@ -108,7 +108,24 @@ pending → ingest_done → reviewed → modified → illustrated → stored →
 ## 风格模板（review + illustrate 阶段必读）
 
 `templates/style-templates/` 目录下放 4 份风格规范：
-- **`dankoe.md`（默认 ⭐）** —— 黑底白字 / 单色调 / 大留白 / 大字占 60-80% / 一句一观点。**illustrate 阶段默认走这个**
+
+### ⭐ 默认模板：`dankoe.md`
+
+**所有 illustrate 出图默认走这个**（除非 frontmatter 显式指定其它）。
+
+基于公开研究的 Dan Koe 视觉 + 写作风格，分 3 部分：
+
+| Part | 用途 | Stage |
+|------|------|-------|
+| **Part 1 视觉** | 配色/字体/排版/尺寸 | illustrate, cover |
+| **Part 2 写作** | 5 个核心模式 + 3-beat 结构 + review 加成 | review, modify |
+| **Part 3 选模板顺序** | dankoe vs 极客 vs 网红 vs 公众号 怎么选 | illustrate |
+
+视觉要点：黑底白字 / 单色调（4 色）/ 大字占 60-80% / 大留白 / 一句一观点 / 16:9 横幅。
+写作要点：哲学 + 实操双层 / identity-shift hook / 现代僧侣哲学框架 / 流程揭示。
+
+### 其它 3 个模板（按需）
+
 - `公众号.md` —— 长文 / 标题党 / 故事化开头 / 多段落 / 强 CTA
 - `网红.md` —— 短句 / emoji 多 / 情绪化 / 个人化视角 / 一句话金句
 - `极客.md` —— 技术准确 / 代码块 / 工具对比表 / 客观中立
