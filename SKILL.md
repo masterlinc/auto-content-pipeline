@@ -1,100 +1,115 @@
 ---
 name: auto-content-pipeline
-description: "内容打磨 + 多平台发布流水线：拿到草稿后按公众号 / 网红 / 极客三种风格模板 review → 自动 modify → 图文并茂 illustrate → 入库到 Obsidian 价值文章区 → 一键分发到小红书 / 掘金 / 少数派 / 知乎 / 公众号（API 待接入）。任意 OpenClaw agent 都可通过 CLI / cron / sub-agent 三种方式调用。"
+description: "内容打磨 + 多平台发布流水线（v3 with Codex Harness）：拿到草稿后用 OpenAI Codex Harness 作为 agent runtime，按公众号 / 网红 / 极客 / dankoe 四种风格模板 review → 自动 modify → 图文并茂 illustrate → 入库到 Obsidian 价值文章区 → 一键分发到小红书 / 掘金 / 少数派 / 知乎 / 公众号（API 待接入）。任意 OpenClaw agent 都可通过 CLI / cron / sub-agent 三种方式调用。"
 metadata:
   {
     "openclaw":
       {
-        "emoji": "✨",
+        "emoji": "⚡",
         "homepage": "skills/auto-content-pipeline/README.md",
         "user_invocable": true
       }
   }
 ---
 
-# Auto Content Pipeline v2 — 打磨工坊
+# Auto Content Pipeline v3 — Codex Harness Edition
 
-把"草稿 → 公众号/网红/极客风爆款文 → 多平台分发"做成端到端自动化。任意 agent 都可以调用。
+把"草稿 → 公众号/网红/极客/dankoe风爆款文 → 多平台分发"做成端到端自动化。v3 用 **OpenAI Codex Harness** 作 agent runtime，v2 的 6 stage 变成 Codex 的 sub-tasks。
 
-> **v1 → v2 重大变更**：v1 是"从零开始生产内容"（scan → review → write → cover → publish）。v2 改成"**拿到草稿后打磨发布**"（ingest → review → modify → illustrate → store → publish）。scan 子流程保留作为 ingest 的可选源。
+> **v1 → v2 → v3 演进**：
+> - v1：从零生产内容（scan → write → cover → publish）
+> - v2：拿到草稿打磨（ingest → review → modify → illustrate → store → publish，6 个独立 Python 脚本）
+> - **v3**：用 Codex Harness 当 runtime（同一个 6 stage，但每个 stage 调 Codex sub-agent）
+
+## 架构（v3）
+
+```
+[Feishu] → [OpenClaw] → [Codex Harness] → [6 stages] → [5 平台]
+                          │
+                          ├─ memory (跨 session)
+                          ├─ permission (publish/delete 前问 linc)
+                          ├─ tool registry (image_generate / xiaohongshu_poster / ...)
+                          └─ sub-agent 派发
+```
+
+详细架构看 `ARCHITECTURE.md`。
 
 ## 六阶段流水线
 
-```
-[ingest] → [review] → [modify] → [illustrate] → [store] → [publish]
-  拿草稿     风格评审     自动润色     图文并茂      入库       多平台分发
-```
-
-| Stage        | 做什么                                              | 输入                          | 输出                                              |
-|--------------|-----------------------------------------------------|-------------------------------|---------------------------------------------------|
-| **ingest**   | 拿草稿                                              | vault 草稿 / 手动 / scan 子流程 | `_drafts/{id}/source.md`                          |
-| **review**   | 按 公众号/网红/极客 三套风格模板打分               | source + 3 个模板             | `review.json`（每维度得分 + 改稿建议）           |
-| **modify**   | 自动按 review 结果改稿                              | source + review.json          | `_drafts/{id}/article.md`                         |
-| **illustrate** | 配图（封面 + 正文 2-3 张）                        | article.md                    | cover.png + body-img-{n}.png                      |
-| **store**    | 入库到 Obsidian 价值文章区                          | 全部 draft 产物               | vault `04-原创写作专区/价值文章/{id}/`            |
-| **publish**  | 多平台分发                                          | store 后的成品                | 小红书 + 掘金 + 少数派 + 知乎（公众号待接入 API） |
+| Stage        | v2 (Python) | v3 (Codex sub-task) |
+|--------------|-------------|---------------------|
+| **ingest**   | `python3 ingest.py file.md` | `codex -p "读 X 写到 _drafts/{id}/"` |
+| **review**   | `python3 review.py draft_id` | `codex -p "按 4 模板给 X 评分"` |
+| **modify**   | `python3 modify.py draft_id` | `codex -p "按 review 改 X"` |
+| **illustrate** | `python3 illustrate.py draft_id` | `codex -p "生成封面+正文图"` |
+| **store**    | `python3 store.py draft_id` | `codex -p "复制到 vault 价值文章"` |
+| **publish**  | `python3 publish.py draft_id --platforms` | `codex -p "发到小红书"` |
 
 ## 三种调用方式
 
-### 1. CLI（本地直接跑）
+### 1. CLI（v3 推荐）
 
 ```bash
+# 装 Codex（首次）
+npm install -g @openai/codex
+codex --version  # 验证
+
+# 跑一条龙
 ACP=~/.openclaw/workspace/skills/auto-content-pipeline
-python3 $ACP/scripts/pipeline.py ingest    <草稿路径或brief_id>
-python3 $ACP/scripts/pipeline.py review   <draft_id>
-python3 $ACP/scripts/pipeline.py modify   <draft_id>
-python3 $ACP/scripts/pipeline.py illustrate <draft_id>
-python3 $ACP/scripts/pipeline.py store    <draft_id>
-python3 $ACP/scripts/pipeline.py publish  <draft_id> --platforms xiaohongshu,juejin
-python3 $ACP/scripts/pipeline.py run-all  <草稿> --from ingest   # 一条龙
-python3 $ACP/scripts/pipeline.py status   # 看所有 draft 状态
+python3 $ACP/scripts/pipeline.py run-all <草稿.md>
+# pipeline.py 会把每个 stage 包成 `codex -p "..."` 调 Codex
+
+# 或直接给 Codex 大 prompt 让它自己跑
+codex -p "按 $ACP/SKILL.md 跑一遍 auto-content-pipeline，把草稿 file.md 处理到 publish"
 ```
 
 ### 2. Cron（系统调度）
 
-参考 `tests/install-cron.sh`：
-- ingest 扫描可挂周日 20:00（用 v1 留下来的 scan 子流程）
-- store→publish 可挂用户指定时间
+v3 默认**不挂定时**——Codex session 按需触发。
+
+如果非要 cron，调 OpenClaw cron：
+- `cron add --name acp-scan-daily --schedule "0 9 * * *" --session-target isolated --payload-kind agentTurn`
+- message: `请用 Codex Harness 跑一遍 auto-content-pipeline v3`
 
 ### 3. Sub-agent（被其他 agent 调用）
 
-任意 agent 可以 spawn 子 agent：
-
-```
-请按 ~/.openclaw/workspace/skills/auto-content-pipeline/SKILL.md 执行 stage: <ingest|review|modify|illustrate|store|publish>。
-draft_id: <id>
-完成后回报：状态变更摘要、关键评分、产物路径。
+```bash
+codex -p "按 $ACP/SKILL.md 执行 stage: review。draft_id: X"
 ```
 
-## 配置/状态文件
+## 配置 / 状态文件
 
-### Skill 端（workspace）
+### Skill 端
 
 ```
 skills/auto-content-pipeline/
-├── SKILL.md
-├── config/default.yaml        # 全局配置（发布平台、风格模板路径、敏感词）
-├── prompts/                   # 每个 stage 的 prompt 模板
-│   ├── ingest.md
-│   ├── review.md
-│   ├── modify.md
-│   ├── illustrate.md
-│   ├── store.md
-│   └── publish.md
-├── scripts/                   # 9 个 stage + 工具脚本
-└── templates/style-templates/ # 公众号/网红/极客 风格模板（示例）
+├── ARCHITECTURE.md       ← v3 架构总览
+├── SKILL.md               ← 本文件（v3）
+├── README.md
+├── CHANGELOG.md
+├── VERSION                ← 3.0.0
+├── config/
+│   ├── default.yaml       ← 平台 + 路径 + 模板
+│   └── codex.toml.example ← Codex 配置示例
+├── prompts/               ← 每个 stage 的 prompt（v3 适配）
+├── scripts/
+│   ├── pipeline.py        ← CLI 入口（v3 调 Codex runner）
+│   ├── codex_runner.py    ← Codex CLI 薄包装
+│   ├── state.py / brief.py / store.py / publish.py  ← v2 兼容层
+└── templates/style-templates/
+    ├── dankoe.md          ⭐ 默认
+    ├── 公众号.md / 网红.md / 极客.md
 ```
 
-### Vault 端（用户）
+### Vault 端
 
 ```
 ~/Documents/Obsidian Vault/
-├── 00-转型·一人事业/
-│   └── 04-原创写作专区/
-│       ├── 草稿/             ← ingest 来源（手动写）
-│       ├── 价值文章/         ← store 目标（打磨后可发）
-│       └── _config/style-templates/  # 风格模板（公众号/网红/极客）
-└── 07-选题与发布/            ← v1 留下来的 scan/brief 区，仍兼容
+├── 00-转型·一人事业/04-原创写作专区/
+│   ├── 草稿/             ← ingest 来源
+│   ├── 价值文章/         ← store 目标
+│   └── _config/style-templates/  ← 4 风格模板（v3 同步）
+└── 07-选题与发布/        ← v1 遗留，仍兼容
 ```
 
 ## Draft 状态机
@@ -111,7 +126,7 @@ pending → ingest_done → reviewed → modified → illustrated → stored →
 
 ### ⭐ 默认模板：`dankoe.md`
 
-**所有 illustrate 出图默认走这个**（除非 frontmatter 显式指定其它）。
+**所有 illustrate 出图默认走这个**（除非 frontmatter 显式指定）。
 
 基于公开研究的 Dan Koe 视觉 + 写作风格，分 3 部分：
 
@@ -139,7 +154,7 @@ pending → ingest_done → reviewed → modified → illustrated → stored →
 
 修改风格规范前必须跟 linc 确认 —— agent 不自动改。
 
-## 发布平台（v2.0.0）
+## 发布平台（v3.0.0）
 
 | 平台       | 状态                | 实现方式                |
 |------------|---------------------|-------------------------|
@@ -149,9 +164,14 @@ pending → ingest_done → reviewed → modified → illustrated → stored →
 | 知乎       | 🚧 待配置           | zhihu API               |
 | 公众号     | ⏸ 待接入 API        | **不走浏览器**，等 AppID/AppSecret |
 
-## v1 → v2 迁移
+## v1 → v2 → v3 迁移
 
-- v1 的 `auto-content-pipeline/SKILL.md` 已替换
-- v1 的 cron（acp-scan-weekly / acp-review-daily）已 disable
-- SkillHub 上 `auto-flow` 已升级到 v2.0.0
-- v1 的 vault 文件（07-选题与发布/）保留作为 scan 子流程的存储
+| 版本 | 时间 | 变化 |
+|------|------|------|
+| v1 | 2026-08-22 上午 | scan → write → cover → publish 4 阶段（已弃用） |
+| v2 | 2026-08-22 下午 | ingest → review → modify → illustrate → store → publish 6 阶段（独立脚本） |
+| v3 | 2026-08-22 深夜 | 同 v2 6 阶段，但 agent runtime 换成 Codex Harness |
+
+- v1 cron（`acp-scan-weekly` / `acp-review-daily`）已 disable
+- v2 stage 脚本**保留可用**（v3 默认走 Codex，可降级到 v2）
+- SkillHub 上 `auto-flow` 已升 v3
