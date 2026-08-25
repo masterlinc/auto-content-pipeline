@@ -1,4 +1,11 @@
-# auto-content-pipeline v2 默认配置
+# auto-content-pipeline v3 默认配置
+
+# v3 的唯一必需配置。可在 config/user.yaml 里覆盖，不要改这里。
+package:
+  output_dir: ~/Documents/Obsidian Vault/00-转型·一人事业/04-原创写作专区/发布包
+  body_image_count: 2
+  # 未自动识别中文字体时，填本机 CJK 字体路径；macOS 默认无需设置。
+  font_path: ""
 
 vault:
   # ingest 来源：用户手动写的草稿
