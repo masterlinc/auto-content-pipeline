@@ -189,6 +189,7 @@ ingest_done → reviewed → modified → illustrated → stored
 ### 其它 3 个模板（按需）
 
 - `公众号.md` —— 长文 / 标题党 / 故事化开头 / 多段落 / 强 CTA
+- `公众号-图文增强.md` —— **v2 升级版**：4 版本同存 + Obsidian callouts + mermaid + LaTeX + Unicode 条 + 10 维度评分表。基于 2026-08-07 Tsipursky manager audit 图文增强版。**这是「AI 管理现场」系列的默认模板。**
 - `网红.md` —— 短句 / emoji 多 / 情绪化 / 个人化视角 / 一句话金句
 - `极客.md` —— 技术准确 / 代码块 / 工具对比表 / 客观中立
 
@@ -198,6 +199,7 @@ ingest_done → reviewed → modified → illustrated → stored
 2. 教程 / 工具盘点 / 实操 → 极客.md
 3. 种草 / 体验 / 个人故事 → 网红.md
 4. 长文深度 / 案例分析 → 公众号.md
+5. **AI 管理现场 / 战略 / 一人事业** → **`公众号-图文增强.md`** ⭐ 推荐
 
 修改风格规范前必须跟 linc 确认 —— agent 不自动改。
 
@@ -221,6 +223,7 @@ ingest_done → reviewed → modified → illustrated → stored
 | v3 | 2026-08-22 深夜 | 暂缓（Codex Harness 集成，文件保留在树里，ACP_USE_CODEX=1 启用） |
 
 - v1 cron（`acp-scan-weekly` / `acp-review-daily`）已 disable
+<<<<<<< SKILL.md
 - v2 stage 脚本**保留可用**
 - v2.1 新增：`scripts/feishu_sync.py` / `scripts/feishu_review.py` / `prompts/sync-feishu.md` / `prompts/review-loop.md`
 - v3 文件保留：codex_runner.py / ARCHITECTURE.md / codex.toml.example
@@ -244,3 +247,101 @@ feishu:
 - `lark-cli auth status` 返回 user identity: ready
 - 飞书云空间根目录有写权限
 - 审阅人 chat_id 拿到（p2p 个人聊天 或 群聊）
+=======
+- v2 stage 脚本**保留可用**（当前默认）
+- v3 文件保留：codex_runner.py / ARCHITECTURE.md / codex.toml.example
+---
+
+# 附录 A：踩坑记录 & 最佳实践
+
+> **版本**：2026-08-26（基于 v2 升级 + 三平台发布的实际经验）
+> **目的**：把每次踩过的坑沉淀下来，下次少走弯路。
+
+## A.1 文件写入 & shell 坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **shell heredoc 吃特殊字符** | `<<'EOF'` 里中文弯引号 `""` / 反引号 / `$` 被 shell 解析，文件实际写入内容跟 heredoc 里的不一样 | 用 Python `Path.write_text()` 代替 heredoc；或者把内容先 base64 编码再 heredoc |
+| **zsh `UID` 是只读** | `UID=xxx` 报「failed to change user ID: operation not permitted」 | 改用 `OUID` 或 `USER_ID` |
+| **heredoc 静默失败** | echo "✓" 打出来了，但文件实际没创建（heredoc EOF 标记写错） | heredoc 后立刻 `ls` 验证文件存在 + 大小 > 0 |
+| **路径里有「的」字漏写** | 路径少一个「的」导致 cp / open 全部找不到 | 脚本里路径用变量传递，不要手敲 |
+
+## A.2 公众号（wechat_draft_push.py）坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **access_token 缓存假永不过期** | cache 文件写 `expires_at: 9999999999`，但实际 API 已过期（errcode 42001）| cache 用真实 unix 时间戳（`time.time() + 7200`），agent 不要手工改 |
+| **IP 白名单 40164** | 跨网络 / 重启后公网 IP 变了，公众号 API 拒 | 跑前 `curl ifconfig.me` 拿当前 IP，去 mp.weixin.qq.com 加白 |
+| **AppSecret 重生后旧值失效** | 重生后所有缓存 token 都作废 | 重生后必删 `~/.openclaw/workspace/.secrets/wechat_access_token.json` 强制刷新 |
+| **⚠️ 中文成 \uXXXX 转义乱码**（2026-08-30 重犯） | `requests.post(url, json=...)` 默认 `ensure_ascii=True`，中文全转义成 `\u4e2d\u53f0...`；WeChat 服务端不解 JSON 转义，把字面字符串存进草稿箱 → 编辑器看到 `\u4e2d` 这种字面字符，全篇乱码。**踩过两次，必须背下来** | 手动序列化为 UTF-8 字节：`json.dumps(payload, ensure_ascii=False).encode("utf-8")` + `headers={"Content-Type": "application/json; charset=utf-8"}`，**不要**用 `requests.post(url, json=...)`（它强制 ensure_ascii=True）。验证：拉草稿回来 title/digest 必须是真中文而非 `\u` 序列 |
+
+## A.3 小红书（xhs_cdp_publisher.py）坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **click_publish selector 失效** | 标题/正文/图都填好了，但 `RuntimeError: 发布按钮没出现` | selector 写死了，小红书偶尔改版会失效；**降级方案是手动点**（脚本退出后 Chrome 里直接点发布按钮） |
+| **kill Chrome → launch → 登录态掉了** | kill + launch 后 persistent profile 登录态被清，post 检测到 `未登录` | kill+launch 后必须跑 `check-login` 验证；如掉登录，提示用户扫 QR |
+| **持久 profile 路径要写对** | `--user-data-dir=~/.config/xiaohongshu-cdp/XhsAutoProfile` 必须每次都带 | 写到 `xhs_cdp_publisher.py launch()` 里，不要让用户传参 |
+
+## A.4 即刻（jike_publisher.py）坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **token 过期 401** | 图片上传七牛失败、动态创建鉴权失败 | 跑 `jike_publisher.py login` 扫码刷新 token（Playwright 抓 `JK_ACCESS_TOKEN` from localStorage）|
+| **cookies 0 条** | login 后 `auth.json` 里 `cookies: 0 条` — 正常，即刻只用 token 不用 cookies | 无需修复 |
+
+## A.5 图像生成坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **AI 直接生成中文错字** | 封面图里的中文字经常多笔少画 | **AI 出底图（无文字）+ PIL 后处理叠字**；中文字体用 `/System/Library/Fonts/STHeiti Medium.ttc` |
+| **3+ 并发触发 RPM 限流** | `minimax/image-01: rate limit exceeded(RPM)` | 串行调用，每次跑完再启下一个 |
+| **mermaid Chrome headless 渲染空** | SVG 没绘制完就 screenshot，得到空白 PNG | 加 `--virtual-time-budget=5000`（等 JS 跑完）|
+| **overlay 文字宽度算错** | 副标题偏移后被截断 | 用 `textbbox()` 量实际宽度，居中公式 `(W - text_w)//2` |
+
+## A.6 内容生产坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **具体公司名（云滇/翰文）漏改** | 草稿里的真名进了发布版 | modify 阶段专门一轮「脱敏 pass」，把公司名/真人名替换为中性词 |
+| **单一平台写一稿，跨平台手动复制** | 4 个平台各写一遍，重复劳动 | **4 版本同存**结构：调整版 / 图文增强版 / 小红书版 / 即刻版，同一文件 `---` 分隔 |
+| **封面叠字没规范** | 不同稿子叠字位置 / 字体不一致 | 用 `<!-- 封面叠字建议 -->` HTML 注释固化建议，主标题 ≤12 字，副标题 ≤20 字 |
+| **公众号不支持 mermaid 渲染** | 草稿里 mermaid 代码块在公众号显示为乱码 | 公众号用 `图文增强版` 的文字 + 表格 + emoji 子标题；mermaid 仅在小红书 / 自留地有用 |
+
+## A.7 流程级坑
+
+| 坑 | 症状 | 修复 |
+|----|------|------|
+| **publish 全自动化期望太高** | 以为脚本能一键全发 | 实际是：**自动填内容 + 半自动点发布**。每个平台都有最后一步需要人工（小红书 selector 失效 / 公众号订阅号必须人工群发 / 即刻 100 字内但 token 要刷）|
+| **跨网络 → 全部 API 失败** | 换 WiFi 后 access_token、IP 白名单、cookies 全失效 | 跨网络场景下必跑「4 件事」：①check 公网 IP ②刷公众号白名单 ③即刻 token ④小红书 Chrome QR 登录 |
+
+## A.8 推荐默认设置（基于本次实战）
+
+```yaml
+默认模板: 公众号-图文增强.md（AI 管理现场系列必选）
+默认封面策略: 1242x1660（3:4）/ 900x383（公众号）/ AI 底图 + PIL 叠字
+默认正文长度: 1500-2500 字（公众号）/ 600 字（小红书）/ 200 字（即刻）
+默认 publish 顺序: 即刻 → 公众号 → 小红书（即刻最易，小红书 selector 最 flaky）
+默认 token 缓存: 用真实 unix 时间戳，禁止 9999999999 假永不过期
+默认 mermaid 渲染: Chrome headless + virtual-time-budget=5000
+默认文件写入: Python Path.write_text()，不用 shell heredoc（除非纯英文）
+```
+
+---
+
+# 附录 B：本次会话（2026-08-26）升级清单
+
+| 改动 | 文件 | 原因 |
+|------|------|------|
+| 新增「公众号-图文增强.md」模板 | `templates/style-templates/` | 参考 2026-08-07 Tsipursky manager audit 图文增强版 |
+| SKILL.md 选模板顺序加 v2 入口 | `SKILL.md` | AI 管理现场系列默认走 v2 |
+| 本附录 A/B | `SKILL.md` | 把本次 12 条踩坑沉淀 |
+
+## B.1 还没修的坑（建议下个版本修）
+
+- [ ] `xhs_cdp_publisher.py click_publish()` 改用更鲁棒的 selector（找含「发布」文本的按钮，过滤「草稿」）
+- [ ] `publish.py` 拆出独立的 `publish_xiaohongshu.py`，支持 `--no-auto-publish` 模式
+- [ ] 公众号自动获取公网 IP + 检查白名单 + 提示用户
+- [ ] 即刻 login 失败时降级方案
+- [ ] 多平台并发 publish 的 lock（避免同时改 `05-发布结果.md` 冲突）
+>>>>>>> /tmp/skill_mine.md
